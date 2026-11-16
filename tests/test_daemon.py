@@ -1,0 +1,602 @@
+from __future__ import annotations
+
+import stat
+import time
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from saltbox_ui.daemon import Services, create_app
+from saltbox_ui.daemon.install import route_settings, systemd_unit, traefik_route, write_route
+from saltbox_ui.layout import Layout
+from saltbox_ui.yamlio import load_plain
+
+LOCAL = "http://127.0.0.1:8701"  # a loopback listener: tools on the server itself
+LOCAL_WS = "ws://127.0.0.1:8701"
+BRIDGE = "http://172.19.0.1:8701"  # the address Traefik reaches the daemon by
+TRAEFIK = "172.19.0.2"
+
+
+@pytest.fixture
+def client(scratch_layout: Layout, fake_sb: Path) -> TestClient:
+    app = create_app(services=Services(scratch_layout))
+    return TestClient(app)
+
+
+@pytest.fixture
+def slow_sb(tmp_path: Path) -> Path:
+    """An sb that prints a line every 50 ms for a while, for stream and cancel tests."""
+    path = tmp_path / "bin" / "sb"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "#!/bin/sh\n"
+        'echo "sb args: $*"\n'
+        'for i in $(seq 1 ${FAKE_SB_LINES:-6}); do echo "line $i"; sleep 0.05; done\n'
+        'exit "${FAKE_SB_EXIT:-0}"\n'
+    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return path
+
+
+def wait_for(predicate, timeout: float = 5.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return
+        time.sleep(0.02)
+    raise AssertionError("timed out")
+
+
+# -- meta, overview, config ------------------------------------------------
+def test_meta_and_no_web(client: TestClient) -> None:
+    meta = client.get("/api/meta").json()
+    assert meta["version"]
+    assert meta["web"] is False
+    assert "repo" in meta["layout"]
+    assert client.get("/").json()["api"] == "/api/openapi.json"
+
+
+def test_overview_on_fresh_layout(client: TestClient) -> None:
+    data = client.get("/api/overview").json()
+    assert data["install"]["installed"] is False
+    assert data["install"]["configs_present"] is False
+    assert data["jobs"]["busy"] is False
+    assert isinstance(data["host"]["disks"], list)
+    assert "accounts" in data["config_issues"]  # required file missing
+
+
+def test_config_round_trip(client: TestClient, scratch_layout: Layout) -> None:
+    files = {f["name"]: f for f in client.get("/api/config").json()}
+    assert files["accounts"]["exists"] is False
+    assert files["accounts"]["source"] == "default"
+
+    shown = client.get("/api/config/accounts").json()
+    assert "user:" in shown["text"]  # the default is offered when the file is missing
+    text = shown["text"].replace("testsaltbox.ml", "example.com")
+    saved = client.put("/api/config/accounts", json={"text": text}).json()
+    assert scratch_layout.config_file("accounts").exists()
+    assert not any(i["message"].startswith("required config file") for i in saved["issues"])
+
+    patched = client.patch(
+        "/api/config/accounts", json={"path": "user.email", "value": "me@example.com"}
+    ).json()
+    assert isinstance(patched["issues"], list)
+    assert load_plain(scratch_layout.config_file("accounts"))["user"]["email"] == "me@example.com"
+
+    bad = client.put("/api/config/accounts", json={"text": "user:\n  name: a\nuser:\n  name: b\n"})
+    assert bad.status_code == 422
+    assert "duplicate" in bad.json()["detail"]
+    assert client.put("/api/config/accounts", json={"text": "a: [\n"}).status_code == 422
+    assert client.get("/api/config/nope").status_code == 404
+
+
+def test_validate_all(client: TestClient) -> None:
+    results = client.post("/api/config/validate").json()
+    assert set(results) >= {"accounts", "settings", "inventory"}
+
+
+def test_inventory_round_trip(client: TestClient, scratch_layout: Layout) -> None:
+    assert client.get("/api/inventory").json()["data"] == {}
+    client.put(
+        "/api/inventory", json={"text": "---\nsonarr_instances:\n  - sonarr\n  - sonarr4k\n"}
+    )
+    data = client.get("/api/inventory").json()
+    assert data["data"]["sonarr_instances"] == ["sonarr", "sonarr4k"]
+    assert data["issues"] == []
+
+
+# -- apps --------------------------------------------------------------------
+def test_apps_and_detail(client: TestClient, scratch_layout: Layout) -> None:
+    apps = client.get("/api/apps").json()
+    roles = [a["role"] for a in apps]
+    assert len(apps) > 40
+    for not_an_app in ("plex_db", "arr_db", "cloudplow_disable", "mainline", "redis", "authelia"):
+        assert not_an_app not in roles, not_an_app
+    titles = [a["title"].lower() for a in apps]
+    assert titles == sorted(titles)
+    assert len(client.get("/api/apps", params={"all": True}).json()) > len(apps)
+    sonarr = next(a for a in apps if a["role"] == "sonarr")
+    assert sonarr["installed"] is False
+    (scratch_layout.appdata / "sonarr").mkdir(parents=True)
+    sonarr = next(a for a in client.get("/api/apps").json() if a["role"] == "sonarr")
+    assert sonarr["installed"] is True  # its /opt folder, not a facts file
+    assert sonarr["instances"] == ["sonarr"]
+    detail = client.get("/api/apps/saltbox/sonarr").json()
+    assert detail["app"]["role"] == "sonarr"
+    assert detail["overrides"]["role"] == {}
+    assert client.get("/api/apps/saltbox/not-an-app").status_code == 404
+
+
+def test_overrides_update(client: TestClient, scratch_layout: Layout) -> None:
+    body = {
+        "values": {
+            "sonarr_instances": ["sonarr", "sonarr4k"],
+            "sonarr_role_traefik_sso_middleware": "",
+        }
+    }
+    data = client.put("/api/apps/saltbox/sonarr/overrides", json=body).json()
+    assert data["overrides"]["role"]["sonarr_role_traefik_sso_middleware"] == ""
+    inv = load_plain(scratch_layout.inventory)
+    assert inv["sonarr_instances"] == ["sonarr", "sonarr4k"]
+    data = client.put(
+        "/api/apps/saltbox/sonarr/overrides", json={"unset": ["sonarr_instances", "missing"]}
+    ).json()
+    assert data["removed"] == ["sonarr_instances"]
+    assert "sonarr_instances" not in load_plain(scratch_layout.inventory)
+
+
+def test_catalog_endpoints(client: TestClient) -> None:
+    categories = client.get("/api/catalog/categories").json()
+    assert isinstance(categories, dict) and categories
+    assert client.get("/api/catalog/tags").json() == {}
+
+
+def test_state_endpoints(client: TestClient) -> None:
+    assert client.get("/api/state/facts").json() == {}
+    assert client.get("/api/state/ports").json() == {}
+    assert client.get("/api/state/motd").json() == []
+    host = client.get("/api/state/host").json()
+    assert "disks" in host and "reboot_required" in host
+
+
+# -- jobs --------------------------------------------------------------------
+def test_job_lifecycle(client: TestClient) -> None:
+    assert client.get("/api/jobs").json()["jobs"] == []
+    started = client.post("/api/jobs", json={"kind": "install", "tags": ["core", "plex"]})
+    assert started.status_code == 202
+    job = started.json()
+    assert job["command_line"].endswith("install core,plex")
+    wait_for(lambda: client.get(f"/api/jobs/{job['id']}").json()["status"] == "succeeded")
+    log = client.get(f"/api/jobs/{job['id']}/log").json()
+    assert "sb args: install core,plex" in log["text"]
+    assert (
+        client.get(f"/api/jobs/{job['id']}/log", params={"offset": log["offset"]}).json()["text"]
+        == ""
+    )
+    assert client.get("/api/jobs/nope").status_code == 404
+    assert client.post("/api/jobs", json={"kind": "install", "tags": []}).status_code == 422
+    assert client.post("/api/jobs", json={"kind": "dance"}).status_code == 422
+
+
+def test_job_rejects_concurrent_runs(scratch_layout: Layout, slow_sb: Path) -> None:
+    client = TestClient(create_app(services=Services(scratch_layout)))
+    first = client.post("/api/jobs", json={"kind": "update"}).json()
+    second = client.post("/api/jobs", json={"kind": "update"})
+    assert second.status_code == 409
+    assert client.get("/api/jobs").json()["busy"] is True
+    wait_for(lambda: client.get(f"/api/jobs/{first['id']}").json()["status"] == "succeeded")
+    # The record says succeeded a moment before the job's thread has run its after-job hooks.
+    wait_for(lambda: client.get("/api/jobs").json()["busy"] is False)
+
+
+def test_job_stream_and_cancel(
+    scratch_layout: Layout, slow_sb: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_SB_LINES", "100")
+    client = TestClient(create_app(services=Services(scratch_layout)))
+    job = client.post("/api/jobs", json={"kind": "update"}).json()
+    with client.websocket_connect(f"/api/jobs/{job['id']}/stream") as ws:
+        received = ""
+        while "line 3" not in received:
+            message = ws.receive_json()
+            assert message["type"] == "log"
+            received += message["text"]
+        assert client.post(f"/api/jobs/{job['id']}/cancel").json()["cancelled"] is True
+        final = None
+        while final is None:
+            message = ws.receive_json()
+            if message["type"] == "done":
+                final = message["job"]
+            else:
+                received += message["text"]
+    assert final["status"] == "interrupted"
+    assert "cancelled" in received
+    assert client.post(f"/api/jobs/{job['id']}/cancel").json()["cancelled"] is False
+
+
+def test_stream_of_finished_job_replays_log(client: TestClient) -> None:
+    job = client.post("/api/jobs", json={"kind": "validate"}).json()
+    wait_for(lambda: client.get(f"/api/jobs/{job['id']}").json()["status"] == "succeeded")
+    with client.websocket_connect(f"/api/jobs/{job['id']}/stream") as ws:
+        text = ""
+        message = ws.receive_json()
+        while message["type"] == "log":
+            text += message["text"]
+            message = ws.receive_json()
+        assert message["type"] == "done"
+        assert message["job"]["status"] == "succeeded"
+    assert "validate-config" in text
+
+
+# -- auth and web ---------------------------------------------------------------
+def test_bearer_token_required_on_tcp(scratch_layout: Layout, fake_sb: Path) -> None:
+    app = create_app(services=Services(scratch_layout, token="s3cret"))
+    client = TestClient(app, base_url=LOCAL)  # a tool on the server itself, over TCP
+    assert client.get("/api/meta").status_code == 401
+    assert client.get("/api/meta", headers={"Authorization": "Bearer wrong"}).status_code == 401
+    assert client.get("/api/meta", headers={"Authorization": "Bearer s3cret"}).status_code == 200
+    assert client.get("/").status_code == 200  # the page itself is not behind the token
+    assert client.get("/openapi.json").status_code != 200  # the schema moved under /api
+    assert client.get("/api/openapi.json").status_code == 401
+
+
+def test_job_stream_needs_the_token(scratch_layout: Layout, fake_sb: Path) -> None:
+    """WebSockets bypass Starlette's BaseHTTPMiddleware; the guard must still check them."""
+    from starlette.websockets import WebSocketDisconnect
+
+    app = create_app(services=Services(scratch_layout, token="s3cret"))
+    client = TestClient(app, base_url=LOCAL)
+    auth = {"Authorization": "Bearer s3cret"}
+    job = client.post("/api/jobs", json={"kind": "validate"}, headers=auth).json()
+    wait_for(
+        lambda: client.get(f"/api/jobs/{job['id']}", headers=auth).json()["status"] == "succeeded"
+    )
+    stream = f"{LOCAL_WS}/api/jobs/{job['id']}/stream"
+    with pytest.raises(WebSocketDisconnect) as refused, client.websocket_connect(stream) as ws:
+        ws.receive_json()
+    assert refused.value.code == 4401
+    with client.websocket_connect(stream, headers=auth) as ws:
+        assert ws.receive_json()["type"] == "log"
+
+
+def test_browser_requests_from_other_sites_are_refused(
+    scratch_layout: Layout, fake_sb: Path
+) -> None:
+    """Traefik adds the token to whatever Authelia lets through, so a page on a sibling
+    subdomain (same site, same Authelia cookie) must not be able to start jobs."""
+    from starlette.websockets import WebSocketDisconnect
+
+    app = create_app(services=Services(scratch_layout, token="s3cret"))
+    client = TestClient(app, base_url=LOCAL)
+    auth = {"Authorization": "Bearer s3cret"}
+    sibling = {**auth, "Sec-Fetch-Site": "same-site"}
+    assert client.post("/api/saltbox/update", headers=sibling).status_code == 403
+    assert client.post("/api/jobs", json={"kind": "validate"}, headers=sibling).status_code == 403
+    assert client.get("/api/meta", headers=sibling).status_code == 200  # reads stay allowed
+    own = {**auth, "Sec-Fetch-Site": "same-origin"}
+    job = client.post("/api/jobs", json={"kind": "validate"}, headers=own)
+    assert job.status_code == 202
+    stream = f"{LOCAL_WS}/api/jobs/{job.json()['id']}/stream"
+    with (
+        pytest.raises(WebSocketDisconnect) as refused,
+        client.websocket_connect(
+            stream, headers={**auth, "Origin": "https://sonarr.example.com"}
+        ) as ws,
+    ):
+        ws.receive_json()
+    assert refused.value.code == 4403
+    with client.websocket_connect(stream, headers={**auth, "Origin": LOCAL}) as ws:
+        assert ws.receive_json()["type"] in {"log", "done"}
+
+
+def test_web_dir_served_with_spa_fallback(scratch_layout: Layout, tmp_path: Path) -> None:
+    web = tmp_path / "dist"
+    (web / "assets").mkdir(parents=True)
+    (web / "index.html").write_text("<html>app</html>")
+    (web / "assets" / "app.js").write_text("console.log(1)")
+    client = TestClient(create_app(services=Services(scratch_layout, web_dir=web)))
+    assert client.get("/").text == "<html>app</html>"
+    assert client.get("/apps/sonarr").text == "<html>app</html>"
+    assert client.get("/assets/app.js").text == "console.log(1)"
+    assert client.get("/api/meta").json()["web"] is True
+
+
+# -- install helpers -------------------------------------------------------------
+def test_systemd_unit_and_route(scratch_layout: Layout, tmp_path: Path) -> None:
+    unit = systemd_unit("/usr/local/bin/saltbox-uid", web=Path("/srv/git/saltbox/ui/web/dist"))
+    assert "ExecStart=/usr/local/bin/saltbox-uid --web /srv/git/saltbox/ui/web/dist" in unit
+    assert "StateDirectory=saltbox-ui" in unit
+
+    route = traefik_route(domain="example.com", token="tok", hsts=True)
+    assert "Host(`saltbox.example.com`)" in route
+    assert "Bearer tok" in route
+    assert "hsts@file" in route and "authelia@docker" in route
+    assert "- '*.example.com'" in route
+    assert "http://172.19.0.1:8701" in route
+    load_plain_route = load_plain(_write(tmp_path / "route.yml", route))
+    assert load_plain_route["http"]["routers"]["saltbox-ui"]["tls"]["certResolver"] == "cfdns"
+
+    plain = traefik_route(
+        domain="example.com", token="tok", wildcard=False, certresolver="httpresolver"
+    )
+    assert "sans" not in plain
+    assert "certResolver: httpresolver" in plain
+
+
+def test_route_settings_and_write(scratch_layout: Layout, tmp_path: Path) -> None:
+    from saltbox_ui.config import ConfigService
+
+    config = ConfigService(scratch_layout)
+    with pytest.raises(ValueError, match=r"user\.domain"):
+        write_route(scratch_layout, "tok", traefik_dir=tmp_path / "traefik")
+    config.ensure_exists("accounts")
+    config.ensure_exists("adv_settings")
+    config.set("accounts", "user.domain", "example.com")
+    config.set("adv_settings", "traefik.cert.http_validation", "yes")
+    config.set("adv_settings", "traefik.cert.zerossl", "yes")
+    settings = route_settings(config)
+    assert settings == {
+        "domain": "example.com",
+        "certresolver": "zerosslhttp",
+        "wildcard": False,
+        "hsts": False,
+    }
+    path = write_route(scratch_layout, "tok", traefik_dir=tmp_path / "traefik")
+    assert path.name == "saltbox-ui.yml"
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert "saltbox.example.com" in path.read_text()
+
+
+def _write(path: Path, text: str) -> Path:
+    path.write_text(text)
+    return path
+
+
+def test_enable_web_writes_everything(scratch_layout: Layout, tmp_path: Path) -> None:
+    from saltbox_ui.config import ConfigService
+    from saltbox_ui.daemon.install import enable_web
+
+    config = ConfigService(scratch_layout)
+    config.ensure_exists("accounts")
+    config.set("accounts", "user.domain", "example.com")
+    result = enable_web(
+        scratch_layout,
+        web=Path("/srv/git/saltbox/ui/web/dist"),
+        unit_dir=tmp_path / "systemd",
+        traefik_dir=tmp_path / "traefik",
+        start=False,
+    )
+    assert result["url"] == "https://saltbox.example.com"
+    assert (tmp_path / "systemd" / "saltbox-ui.service").exists()
+    # Traefik gets a token of its own: it shows its configuration to every container.
+    token = (scratch_layout.state_dir / "proxy-token").read_text().strip()
+    local = (scratch_layout.state_dir / "api-token").read_text().strip()
+    route = (tmp_path / "traefik" / "saltbox-ui.yml").read_text()
+    assert token and local and token != local
+    assert f"Bearer {token}" in route and local not in route
+    assert (
+        "--web /srv/git/saltbox/ui/web/dist"
+        in (tmp_path / "systemd" / "saltbox-ui.service").read_text()
+    )
+    assert result["steps"] == {}
+
+
+def test_default_web_dir_is_the_source_trees_build(
+    scratch_layout: Layout, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An editable install serves web/dist from the source tree it was installed from."""
+    from saltbox_ui.daemon import app as daemon_app
+    from saltbox_ui.daemon.app import default_web_dir
+    from saltbox_ui.daemon.install import enable_web
+
+    package = tmp_path / "src" / "saltbox_ui"
+    (package / "daemon").mkdir(parents=True)
+    monkeypatch.setattr(daemon_app, "__file__", str(package / "daemon" / "app.py"))
+    assert default_web_dir(scratch_layout) is None
+    dist = tmp_path / "src" / "web" / "dist"
+    dist.mkdir(parents=True)
+    (dist / "index.html").write_text("<html></html>")
+    assert default_web_dir(scratch_layout) == dist
+
+    from saltbox_ui.config import ConfigService
+
+    config = ConfigService(scratch_layout)
+    config.ensure_exists("accounts")
+    config.set("accounts", "user.domain", "example.com")
+    result = enable_web(
+        scratch_layout,
+        unit_dir=scratch_layout.state_dir / "systemd",
+        traefik_dir=scratch_layout.state_dir / "traefik",
+        start=False,
+    )
+    assert result["web"] == str(dist)
+    assert "warning" not in result
+    unit = (scratch_layout.state_dir / "systemd" / "saltbox-ui.service").read_text()
+    assert f"--web {dist}" in unit
+
+
+def test_git_describe_reads_a_repo_owned_by_someone_else(monkeypatch) -> None:
+    """As that someone else: a checkout's .git/config can name commands for git to run,
+    so root reads the Saltbox user's repository as the Saltbox user, not as root."""
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+
+    from saltbox_ui.daemon.routes import _git_describe
+
+    # Somewhere its owner can reach, as /srv/git/saltbox is (pytest's tmp_path is root's).
+    base = Path(tempfile.mkdtemp(prefix="sbx-git-", dir="/tmp"))
+    base.chmod(0o755)
+    repo = base / "repo"
+    repo.mkdir()
+    marker = base / "ran-as"
+    subprocess.run(["git", "init", "-q", "-b", "feature/x"], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "x",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    monkeypatch.delenv("SUDO_UID", raising=False)
+    # What a hostile owner would do: have git run a command of theirs.
+    subprocess.run(
+        ["git", "config", "remote.origin.url", str(repo)],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "remote.origin.uploadpack", f"sh -c 'id -u > {marker}; exit 1'"],
+        cwd=repo,
+        check=True,
+    )
+    if os.geteuid() == 0:
+        subprocess.run(["chown", "-R", "nobody", str(base)], check=True)
+    try:
+        described = _git_describe(repo)
+        assert described["branch"] == "feature/x"
+        assert described["commit"]
+        from saltbox_ui.state.repos import check_repo
+
+        check_repo(repo)  # runs git ls-remote, which is where such a command would run
+        assert marker.exists(), "the test's command was not run at all"
+        if os.geteuid() == 0:
+            assert marker.read_text().strip() != "0", "the owner's command ran as root"
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def test_only_the_saltbox_admin_gets_in_through_the_proxy(
+    scratch_layout: Layout, fake_sb: Path
+) -> None:
+    """Traefik adds the token to whatever single sign-on lets through, so the daemon checks
+    who signed in: other SSO users, and requests a bypass rule let through, are refused."""
+    from starlette.websockets import WebSocketDisconnect
+
+    scratch_layout.config_file("accounts").write_text("---\nuser:\n  name: seed\n")
+
+    def traefik(**options) -> TestClient:
+        """Requests as Traefik makes them: to the bridge address, from its container."""
+        services = Services(
+            scratch_layout,
+            token="local",
+            proxy_token="s3cret",
+            proxy_peer=lambda peer: peer == TRAEFIK,
+            **options,
+        )
+        return TestClient(create_app(services=services), base_url=BRIDGE, client=(TRAEFIK, 40000))
+
+    client = traefik()
+    auth = {"Authorization": "Bearer s3cret"}
+    proxied = {**auth, "X-Forwarded-Host": "saltbox.example.com"}
+
+    bypass = client.get("/api/meta", headers=proxied)
+    assert bypass.status_code == 403 and "no signed-in user" in bypass.json()["error"]
+    # the token alone is not enough here, with or without the header a proxy adds
+    assert client.get("/api/meta", headers=auth).status_code == 403
+    guest = client.get("/api/meta", headers={**proxied, "Remote-User": "guest"})
+    assert guest.status_code == 403 and "signed in as guest" in guest.json()["error"]
+    assert client.get("/api/meta", headers={**proxied, "Remote-User": "Seed"}).status_code == 200
+    in_group = {**proxied, "Remote-User": "partner", "Remote-Groups": "family,admins"}
+    assert client.get("/api/meta", headers=in_group).status_code == 200
+    # Only the configured sign-on's headers count. Traefik replaces Authelia's with what
+    # Authelia answered, and would pass authentik's through from the browser untouched.
+    authentik = {**proxied, "X-authentik-username": "partner", "X-authentik-groups": "admins|x"}
+    assert client.get("/api/meta", headers=authentik).status_code == 403
+    forged = {**proxied, "Remote-User": "guest", "X-authentik-groups": "admins"}
+    assert client.get("/api/meta", headers=forged).status_code == 403
+    with_authentik = traefik(sso="authentik")
+    assert with_authentik.get("/api/meta", headers=authentik).status_code == 200
+    assert with_authentik.get("/api/meta", headers=in_group).status_code == 403
+    refused = client.post(
+        "/api/jobs", json={"kind": "validate"}, headers={**proxied, "Remote-User": "guest"}
+    )
+    assert refused.status_code == 403
+
+    admin = {**proxied, "Remote-User": "seed"}
+    job = client.post("/api/jobs", json={"kind": "validate"}, headers=admin).json()
+    stream = f"ws://172.19.0.1:8701/api/jobs/{job['id']}/stream"
+    with (
+        pytest.raises(WebSocketDisconnect) as closed,
+        client.websocket_connect(stream, headers={**proxied, "Remote-User": "guest"}) as ws,
+    ):
+        ws.receive_json()
+    assert closed.value.code == 4403
+
+    open_door = traefik(admin_check=False)
+    assert (
+        open_door.get("/api/meta", headers={**proxied, "Remote-User": "guest"}).status_code == 200
+    )
+
+
+def test_disable_web_removes_what_enable_put_there(scratch_layout: Layout, tmp_path: Path) -> None:
+    from saltbox_ui.daemon.install import disable_web, enable_web
+
+    scratch_layout.config_file("accounts").write_text("---\nuser:\n  domain: example.com\n")
+    units, traefik = tmp_path / "units", tmp_path / "traefik"
+    enable_web(scratch_layout, unit_dir=units, traefik_dir=traefik, start=False)
+    (units / "saltbox-ui-portsync.timer").write_text("[Timer]\n")
+    assert (units / "saltbox-ui.service").exists() and (traefik / "saltbox-ui.yml").exists()
+    calls: list[tuple[str, ...]] = []
+
+    def ctl(*args: str) -> tuple[int, str]:
+        calls.append(args)
+        return 0, ""
+
+    result = disable_web(scratch_layout, unit_dir=units, traefik_dir=traefik, run=ctl)
+    assert ("disable", "--now", "saltbox-ui.service") in calls and ("daemon-reload",) in calls
+    assert not list(units.iterdir()) and not (traefik / "saltbox-ui.yml").exists()
+    assert (scratch_layout.state_dir / "api-token").exists()  # kept unless purged
+    assert result["state_kept"] == str(scratch_layout.state_dir)
+    disable_web(scratch_layout, unit_dir=units, traefik_dir=traefik, run=ctl, purge=True)
+    assert not scratch_layout.state_dir.exists()
+
+
+def test_packaged_web_app_is_found(scratch_layout: Layout, monkeypatch, tmp_path: Path) -> None:
+    from saltbox_ui.daemon import app as daemon_app
+
+    package = tmp_path / "site-packages" / "saltbox_ui"
+    (package / "daemon").mkdir(parents=True)
+    (package / "web_dist").mkdir()
+    (package / "web_dist" / "index.html").write_text("<html></html>")
+    monkeypatch.setattr(daemon_app, "__file__", str(package / "daemon" / "app.py"))
+    assert daemon_app.default_web_dir(scratch_layout) == package / "web_dist"
+
+
+def test_reboot_from_the_web_app(
+    scratch_layout: Layout, slow_sb: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The overview says which updates want the restart; the restart waits for running jobs."""
+    from saltbox_ui.daemon import routes as daemon_routes
+
+    monkeypatch.setattr(daemon_routes, "_containers_or_none", lambda: [])
+    monkeypatch.setenv("FAKE_SB_LINES", "100")
+    flag = tmp_path / "reboot-required"
+    flag.write_text("*** System restart required ***\n")
+    (tmp_path / "reboot-required.pkgs").write_text("linux-image-6.8.0-55-generic\nlibc6\n")
+    rebooted: list[bool] = []
+    services = Services(scratch_layout, reboot=lambda: rebooted.append(True), reboot_flag=flag)
+    client = TestClient(create_app(services=services))
+    host = client.get("/api/overview").json()["host"]
+    assert host["reboot_required"] is True
+    assert host["reboot_packages"] == ["libc6", "linux-image-6.8.0-55-generic"]
+
+    job = client.post("/api/jobs", json={"kind": "install", "tags": ["core"]}).json()
+    refused = client.post("/api/host/reboot")
+    assert refused.status_code == 409 and "job is running" in refused.json()["detail"]
+    assert rebooted == []
+    client.post(f"/api/jobs/{job['id']}/cancel")
+    services.jobs.wait(10)
+    assert client.post("/api/host/reboot").json() == {"rebooting": True}
+    assert rebooted == [True]

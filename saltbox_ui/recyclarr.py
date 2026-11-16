@@ -1,0 +1,282 @@
+"""Recyclarr, set up from the web app: pick TRaSH Guides profiles, write the config.
+
+Recyclarr (the Sandbox role) syncs quality profiles and custom formats from the
+TRaSH Guides into Sonarr and Radarr. With Recyclarr 8 a profile is one
+``trash_id``; this module writes ``recyclarr.yml`` with the chosen ones for
+every installed Sonarr and Radarr instance, and ``secrets.yml`` with their
+addresses and API keys read from the apps' own config, so no key is ever typed
+or shown. A config written by hand is kept as a dated ``.bak`` copy first.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from secrets import token_hex
+from typing import Any
+
+from . import safefs
+from .appsetup.discover import API_VERSION, Discovery, Service
+from .appsetup.http import Client, Transport
+from .layout import Layout
+
+MARKER = "# Managed by the Saltbox UI"
+CONTAINER = "recyclarr"
+
+
+@dataclass(frozen=True)
+class Profile:
+    trash_id: str
+    name: str
+    summary: str
+    default: bool = False
+
+
+PROFILES: dict[str, list[Profile]] = {
+    "sonarr": [
+        Profile(
+            "72dae194fc92bf828f32cde7744e51a1",
+            "WEB-1080p",
+            "1080p releases from streaming services. The TRaSH Guides default for TV.",
+            default=True,
+        ),
+        Profile(
+            "d1498e7d189fbe6c7110ceaabb7473e6",
+            "WEB-2160p",
+            "4K releases from streaming services, with HDR when there is one.",
+        ),
+    ],
+    "radarr": [
+        Profile(
+            "d1d67249d3890e49bc12e275d989a7e9",
+            "HD Bluray + WEB",
+            "1080p Blu-ray encodes and streaming releases. The default for movies.",
+            default=True,
+        ),
+        Profile(
+            "64fb5f9858489bdac2af690e27c8f42f",
+            "UHD Bluray + WEB",
+            "4K Blu-ray encodes and streaming releases.",
+        ),
+        Profile(
+            "9ca12ea80aa55ef916e3751f4b874151",
+            "Remux + WEB 1080p",
+            "Untouched 1080p Blu-ray remuxes; large files (20-40 GB a film).",
+        ),
+        Profile(
+            "fd161a61e3ab826d3a22d53f935696dd",
+            "Remux + WEB 2160p",
+            "Untouched 4K remuxes; very large files (40-80 GB a film).",
+        ),
+    ],
+}
+QUALITY_TYPE = {"sonarr": "series", "radarr": "movie"}
+TRASH_ID = re.compile(r"trash_id:\s*['\"]?([0-9a-f]{32})")
+
+
+def config_dir(layout: Layout) -> Path:
+    return layout.appdata / CONTAINER
+
+
+def status(
+    layout: Layout, found: Discovery, containers: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """What is installed, what the config selects now, and whether we wrote it."""
+    directory = config_dir(layout)
+    config = directory / "recyclarr.yml"
+    text = safefs.read_text_or_none(config, base=layout.appdata) or ""
+    selected = set(TRASH_ID.findall(text))
+    record = containers.get(CONTAINER)
+    return {
+        "installed": directory.is_dir() or record is not None,
+        "running": bool(record and record.get("status") == "running"),
+        "config_exists": config.exists(),
+        "managed": text.startswith(MARKER) or not text.strip(),
+        "selected": {
+            app: [p.trash_id for p in profiles if p.trash_id in selected]
+            for app, profiles in PROFILES.items()
+        },
+        "profiles": {app: [asdict(p) for p in profiles] for app, profiles in PROFILES.items()},
+        "instances": {app: [s.name for s in found.installed(app) if s.api_key] for app in PROFILES},
+    }
+
+
+class RecyclarrError(ValueError):
+    pass
+
+
+def write_config(
+    layout: Layout, found: Discovery, selection: dict[str, list[str]]
+) -> dict[str, Any]:
+    """Write recyclarr.yml and secrets.yml for the chosen profiles; returns what was done."""
+    directory = config_dir(layout)
+    if not directory.is_dir():
+        raise RecyclarrError("Recyclarr is not installed (no /opt/recyclarr yet)")
+    known = {app: {p.trash_id: p for p in profiles} for app, profiles in PROFILES.items()}
+    chosen = {
+        app: [known[app][i] for i in ids if i in known.get(app, {})]
+        for app, ids in selection.items()
+        if app in PROFILES
+    }
+    instances = {app: [s for s in found.installed(app) if s.api_key] for app in PROFILES}
+    if not any(chosen.get(app) and instances[app] for app in PROFILES):
+        raise RecyclarrError("choose at least one profile for an installed Sonarr or Radarr")
+
+    lines = [
+        f"{MARKER}. Saving profiles there replaces this file; the previous one is kept as .bak.",
+        "# Profiles come from the TRaSH Guides: https://trash-guides.info",
+    ]
+    secrets = [f"{MARKER}: addresses and API keys for recyclarr.yml."]
+    for app in PROFILES:
+        profiles, services = chosen.get(app) or [], instances[app]
+        if not profiles or not services:
+            continue
+        lines.append(f"{app}:")
+        for service in services:
+            lines += [
+                f"  {service.name}:",
+                f"    base_url: !secret {service.name}_url",
+                f"    api_key: !secret {service.name}_apikey",
+                "    delete_old_custom_formats: true",
+                "    quality_definition:",
+                f"      type: {QUALITY_TYPE[app]}",
+                "    quality_profiles:",
+            ]
+            for profile in profiles:
+                lines += [
+                    f"      - trash_id: {profile.trash_id}  # {profile.name}",
+                    "        reset_unmatched_scores:",
+                    "          enabled: true",
+                ]
+            secrets += [
+                f"{service.name}_url: {service.url}",
+                f'{service.name}_apikey: "{service.api_key}"',
+            ]
+
+    config = directory / "recyclarr.yml"
+    backup = None
+    # The folder is the Recyclarr container's: it could put a link where a file is expected.
+    # Nothing in it is opened, written or handed over by name (see ``safefs``).
+    try:
+        with safefs.open_dir(directory) as folder:
+            owner = safefs.owner_of(folder)
+            try:
+                current = safefs.read_text("recyclarr.yml", dir_fd=folder)
+            except FileNotFoundError:
+                current = ""
+            if current.strip() and not current.startswith(MARKER):
+                # Kept by giving the file itself another name. Its content is not
+                # copied into a file of the folder owner's: a file someone moved here
+                # stays as private as it was.
+                stamp = f"{time.strftime('%Y%m%d-%H%M%S')}-{token_hex(3)}"
+                backup = directory / f"recyclarr.yml.bak-{stamp}"
+                os.link(
+                    "recyclarr.yml",
+                    backup.name,
+                    src_dir_fd=folder,
+                    dst_dir_fd=folder,
+                    follow_symlinks=False,
+                )
+            safefs.replace_file(
+                folder,
+                "recyclarr.yml",
+                ("\n".join(lines) + "\n").encode("utf-8"),
+                mode=0o640,
+                owner=owner,
+            )
+            safefs.replace_file(
+                folder,
+                "secrets.yml",
+                ("\n".join(secrets) + "\n").encode("utf-8"),
+                mode=0o600,
+                owner=owner,
+            )
+    except safefs.UnsafeFile as error:
+        raise RecyclarrError(f"{error}; put a normal file there first") from error
+    except OSError as error:
+        raise RecyclarrError(f"cannot write in {directory}: {error.strerror or error}") from error
+    return {
+        "config": str(config),
+        "backup": str(backup) if backup else None,
+        "instances": {app: [s.name for s in instances[app]] for app in PROFILES},
+    }
+
+
+# -- are the profiles in use? ----------------------------------------------------------------
+# Recyclarr creates profiles; it never moves a show or a film onto one. Sonarr and Radarr
+# keep using whatever profile each item already had, so a sync alone changes nothing visible.
+LIBRARY = {"sonarr": ("series", "seriesIds", "series"), "radarr": ("movie", "movieIds", "films")}
+
+
+def arr_client(service: Service, transport: Transport | None) -> Client:
+    return Client(
+        f"{service.host_url}/api/{API_VERSION[service.role]}",
+        headers={"X-Api-Key": service.api_key},
+        transport=transport,
+        name=service.name,
+    )
+
+
+def selected_names(text: str, app: str) -> list[str]:
+    """Names of the profiles recyclarr.yml asks for, which is what Recyclarr calls them."""
+    chosen = set(TRASH_ID.findall(text))
+    return [profile.name for profile in PROFILES[app] if profile.trash_id in chosen]
+
+
+def usage(
+    service: Service, synced: list[str], transport: Transport | None = None
+) -> dict[str, Any]:
+    """One Sonarr or Radarr: its quality profiles, how many items use each, and which of the
+    profiles Recyclarr was asked for are there."""
+    resource, _ids, noun = LIBRARY[service.role]
+    client = arr_client(service, transport)
+    profiles = client.get("/qualityprofile") or []
+    items = client.get(f"/{resource}") or []
+    counts: dict[int, int] = {}
+    for item in items:
+        profile = item.get("qualityProfileId")
+        if isinstance(profile, int):
+            counts[profile] = counts.get(profile, 0) + 1
+    wanted = {name.lower() for name in synced}
+    listed = [
+        {
+            "id": profile["id"],
+            "name": str(profile.get("name", "")),
+            "count": counts.get(profile["id"], 0),
+            "synced": str(profile.get("name", "")).lower() in wanted,
+        }
+        for profile in profiles
+        if isinstance(profile.get("id"), int)
+    ]
+    present = {profile["name"].lower() for profile in listed}
+    return {
+        "name": service.name,
+        "app": service.role,
+        "noun": noun,
+        "total": len(items),
+        "profiles": sorted(listed, key=lambda p: (not p["synced"], -p["count"], p["name"])),
+        # Asked for in recyclarr.yml but not in the app: the sync has not run, or it failed.
+        "missing": [name for name in synced if name.lower() not in present],
+    }
+
+
+def assign(service: Service, profile_id: int, transport: Transport | None = None) -> dict[str, Any]:
+    """Put every series or film of one app on quality profile ``profile_id``.
+
+    This is the app's own mass editor (``PUT /series/editor`` or
+    ``/movie/editor``). Nothing is searched for or downloaded by it; the app
+    upgrades files later, as it finds releases the new profile prefers.
+    """
+    resource, ids_field, _noun = LIBRARY[service.role]
+    client = arr_client(service, transport)
+    profiles = {p.get("id"): str(p.get("name", "")) for p in client.get("/qualityprofile") or []}
+    if profile_id not in profiles:
+        raise RecyclarrError(f"{service.name} has no quality profile {profile_id}")
+    items = client.get(f"/{resource}") or []
+    ids = [item["id"] for item in items if item.get("qualityProfileId") != profile_id]
+    if ids:
+        client.put(f"/{resource}/editor", {ids_field: ids, "qualityProfileId": profile_id})
+    return {"moved": len(ids), "total": len(items), "profile": profiles[profile_id]}

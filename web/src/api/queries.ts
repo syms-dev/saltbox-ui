@@ -1,0 +1,646 @@
+import { useEffect, useRef } from 'react';
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseMutationResult,
+  type UseQueryResult,
+} from '@tanstack/react-query';
+
+import { API_ROUTES, apiFetch, apiPost, apiPut } from './client';
+import type {
+  DiscImages,
+  DiscImagesResult,
+  App,
+  AppDetail,
+  ConfigFile,
+  ConfigFileSummary,
+  Inventory,
+  Issue,
+  Job,
+  JobRequest,
+  JobsResponse,
+  MediaSnapshot,
+  Meta,
+  AutomationSettings,
+  AutomationStatus,
+  BackupSummary,
+  ContainerAction,
+  ContainerLogs,
+  ContainerState,
+  Overview,
+  RecyclarrStatus,
+  RecyclarrUsage,
+  SeedingStatus,
+  SelfStatus,
+  DriveHealth,
+  ExplainStatus,
+  Explanation,
+  LogProblems,
+  Resources,
+  UninstallResult,
+  SetupResponse,
+  TailscaleStatus,
+  UpdatesResponse,
+} from './types';
+
+export const QUERY_KEYS = {
+  APPS: 'apps',
+  CONFIG: 'config',
+  INVENTORY: 'inventory',
+  JOBS: 'jobs',
+  META: 'meta',
+  BACKUPS: 'backups',
+  LOGS: 'logs',
+  OVERVIEW: 'overview',
+  SETUP: 'setup',
+  UPDATES: 'updates',
+} as const;
+
+const OVERVIEW_REFRESH_MS = 15_000;
+const JOBS_REFRESH_MS = 3_000;
+
+export function useMeta(): UseQueryResult<Meta> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<Meta>(API_ROUTES.META, { signal }),
+    queryKey: [QUERY_KEYS.META],
+  });
+}
+
+export function useOverview(): UseQueryResult<Overview> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<Overview>(API_ROUTES.OVERVIEW, { signal }),
+    queryKey: [QUERY_KEYS.OVERVIEW],
+    refetchInterval: OVERVIEW_REFRESH_MS,
+  });
+}
+
+export function useApps(): UseQueryResult<App[]> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<App[]>(API_ROUTES.APPS, { signal }),
+    queryKey: [QUERY_KEYS.APPS],
+  });
+}
+
+/** An answer with secrets shown is dropped as soon as nothing displays it, not kept for reuse. */
+function unkept(reveal: boolean): { gcTime?: number } {
+  return reveal ? { gcTime: 0 } : {};
+}
+
+export function useAppDetail(repo: string, role: string, reveal = false): UseQueryResult<AppDetail> {
+  return useQuery({
+    placeholderData: (previous) => previous,
+    queryFn: ({ signal }) =>
+      apiFetch<AppDetail>(`${API_ROUTES.appDetail(repo, role)}${reveal ? '?reveal=true' : ''}`, { signal }),
+    ...unkept(reveal),
+    queryKey: [QUERY_KEYS.APPS, repo, role, reveal],
+  });
+}
+
+export function useJobs(): UseQueryResult<JobsResponse> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<JobsResponse>(API_ROUTES.JOBS, { signal }),
+    queryKey: [QUERY_KEYS.JOBS],
+    refetchInterval: JOBS_REFRESH_MS,
+  });
+}
+
+export function useJob(id: string): UseQueryResult<Job> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<Job>(API_ROUTES.job(id), { signal }),
+    queryKey: [QUERY_KEYS.JOBS, id],
+    refetchInterval: (query) => (query.state.data?.status === 'running' ? JOBS_REFRESH_MS : false),
+  });
+}
+
+export function useConfigFiles(): UseQueryResult<ConfigFileSummary[]> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<ConfigFileSummary[]>(API_ROUTES.CONFIG, { signal }),
+    queryKey: [QUERY_KEYS.CONFIG],
+  });
+}
+
+export function useConfigFile(name: string, reveal = false): UseQueryResult<ConfigFile> {
+  return useQuery({
+    queryFn: ({ signal }) =>
+      apiFetch<ConfigFile>(`${API_ROUTES.configFile(name)}${reveal ? '?reveal=true' : ''}`, { signal }),
+    ...unkept(reveal),
+    queryKey: [QUERY_KEYS.CONFIG, name, reveal],
+  });
+}
+
+export function useInventory(reveal = false): UseQueryResult<Inventory> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<Inventory>(`${API_ROUTES.INVENTORY}${reveal ? '?reveal=true' : ''}`, { signal }),
+    ...unkept(reveal),
+    queryKey: [QUERY_KEYS.INVENTORY, reveal],
+  });
+}
+
+export function useStartJob(): UseMutationResult<Job, Error, JobRequest> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (request: JobRequest) => apiPost<Job>(API_ROUTES.JOBS, request),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.JOBS] });
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.OVERVIEW] });
+    },
+  });
+}
+
+export function useCancelJob(): UseMutationResult<{ cancelled: boolean }, Error, string> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiPost<{ cancelled: boolean }>(API_ROUTES.jobCancel(id)),
+    onSuccess: () => void client.invalidateQueries({ queryKey: [QUERY_KEYS.JOBS] }),
+  });
+}
+
+/** Answer the yes/no question a running job is waiting on. */
+export function useAnswerJob(): UseMutationResult<{ answered: boolean }, Error, { answer: boolean; id: string }> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ answer, id }) => apiPost<{ answered: boolean }>(API_ROUTES.jobAnswer(id), { answer }),
+    onSettled: () => void client.invalidateQueries({ queryKey: [QUERY_KEYS.JOBS] }),
+  });
+}
+
+type SaveConfigInput = { name: string; text: string };
+type SaveConfigResult = { issues: Issue[]; name: string };
+
+export function useSaveConfig(): UseMutationResult<SaveConfigResult, Error, SaveConfigInput> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, text }: SaveConfigInput) => apiPut<SaveConfigResult>(API_ROUTES.configFile(name), { text }),
+    onSuccess: (_result, { name }) => {
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.CONFIG, name] });
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.CONFIG] });
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.OVERVIEW] });
+    },
+  });
+}
+
+export function useSaveInventory(): UseMutationResult<{ issues: Issue[] }, Error, string> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (text: string) => apiPut<{ issues: Issue[] }>(API_ROUTES.INVENTORY, { text }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.INVENTORY] });
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.APPS] });
+    },
+  });
+}
+
+type OverridesInput = { repo: string; role: string; unset?: string[]; values?: Record<string, unknown> };
+type OverridesResult = { overrides: Record<string, Record<string, unknown>>; removed: string[] };
+
+export function useUpdateOverrides(): UseMutationResult<OverridesResult, Error, OverridesInput> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ repo, role, unset, values }: OverridesInput) =>
+      apiPut<OverridesResult>(API_ROUTES.appOverrides(repo, role), { unset: unset ?? [], values: values ?? {} }),
+    onSuccess: (_result, { repo, role }) => {
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.APPS, repo, role] });
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.APPS] });
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.INVENTORY] });
+    },
+  });
+}
+
+export function useValidateConfig(): UseMutationResult<Record<string, Issue[]>, Error, void> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<Record<string, Issue[]>>(API_ROUTES.CONFIG_VALIDATE),
+    onSuccess: () => void client.invalidateQueries({ queryKey: [QUERY_KEYS.OVERVIEW] }),
+  });
+}
+
+const UPDATES_POLL_MS = 3_000;
+
+/** Update status; polls while a check runs, then refreshes the pages that show its results. */
+export function useUpdates(): UseQueryResult<UpdatesResponse> {
+  const client = useQueryClient();
+  const result = useQuery({
+    queryFn: ({ signal }) => apiFetch<UpdatesResponse>(API_ROUTES.UPDATES, { signal }),
+    queryKey: [QUERY_KEYS.UPDATES],
+    refetchInterval: (query) => (query.state.data?.running === true ? UPDATES_POLL_MS : false),
+  });
+  const checkedAt = result.data?.checked_at ?? null;
+  const seen = useRef(checkedAt);
+  useEffect(() => {
+    if (checkedAt === seen.current) return;
+    seen.current = checkedAt;
+    // A first load still in flight would otherwise be reused as is, from before the check.
+    for (const key of [QUERY_KEYS.OVERVIEW, QUERY_KEYS.APPS]) {
+      void client.cancelQueries({ queryKey: [key] }).then(() => client.invalidateQueries({ queryKey: [key] }));
+    }
+  }, [checkedAt, client]);
+  return result;
+}
+
+function invalidateUpdates(client: ReturnType<typeof useQueryClient>): void {
+  void client.invalidateQueries({ queryKey: [QUERY_KEYS.UPDATES] });
+  void client.invalidateQueries({ queryKey: [QUERY_KEYS.APPS] });
+  void client.invalidateQueries({ queryKey: [QUERY_KEYS.OVERVIEW] });
+  void client.invalidateQueries({ queryKey: [QUERY_KEYS.JOBS] });
+}
+
+export function useCheckUpdates(): UseMutationResult<UpdatesResponse, Error, void> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<UpdatesResponse>(API_ROUTES.UPDATES_CHECK),
+    onSuccess: () => invalidateUpdates(client),
+  });
+}
+
+type UpdateAppInput = { repo: string; role: string };
+
+export function useUpdateApp(): UseMutationResult<Job, Error, UpdateAppInput> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ repo, role }: UpdateAppInput) => apiPost<Job>(API_ROUTES.appUpdate(repo, role)),
+    onSuccess: () => invalidateUpdates(client),
+  });
+}
+
+export function useUpdateAll(): UseMutationResult<Job, Error, void> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<Job>(API_ROUTES.UPDATES_APPLY),
+    onSuccess: () => invalidateUpdates(client),
+  });
+}
+
+/** `sb update`: brings the Saltbox checkouts up to their branches. */
+export function useUpdateSaltbox(): UseMutationResult<Job, Error, void> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<Job>(API_ROUTES.SALTBOX_UPDATE),
+    onSuccess: () => invalidateUpdates(client),
+  });
+}
+
+type ContainerActionInput = { action: ContainerAction; name: string };
+
+/** Start, stop or restart a container; refreshes everything that shows container state. */
+export function useContainerAction(): UseMutationResult<ContainerState, Error, ContainerActionInput> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ action, name }: ContainerActionInput) =>
+      apiPost<ContainerState>(API_ROUTES.containerAction(name, action)),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.APPS] });
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.OVERVIEW] });
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.LOGS] });
+    },
+  });
+}
+
+const LOGS_LIVE_MS = 4_000;
+
+export function useContainerLogs(name: string, tail: number, live: boolean): UseQueryResult<ContainerLogs> {
+  return useQuery({
+    enabled: name !== '',
+    queryFn: ({ signal }) => apiFetch<ContainerLogs>(API_ROUTES.containerLogs(name, tail), { signal }),
+    queryKey: [QUERY_KEYS.LOGS, name, tail],
+    refetchInterval: live ? LOGS_LIVE_MS : false,
+  });
+}
+
+export function useSetup(reveal = false): UseQueryResult<SetupResponse> {
+  return useQuery({
+    placeholderData: (previous) => previous,
+    queryFn: ({ signal }) => apiFetch<SetupResponse>(`${API_ROUTES.SETUP}${reveal ? '?reveal=true' : ''}`, { signal }),
+    ...unkept(reveal),
+    queryKey: [QUERY_KEYS.SETUP, reveal],
+  });
+}
+
+export function useApplySetup(): UseMutationResult<SetupResponse, Error, void> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<SetupResponse>(API_ROUTES.SETUP_APPLY),
+    onSuccess: () => void client.invalidateQueries({ queryKey: [QUERY_KEYS.SETUP] }),
+  });
+}
+
+const RESOURCES_REFRESH_MS = 10_000;
+
+export function useResources(): UseQueryResult<Resources> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<Resources>(API_ROUTES.RESOURCES, { signal }),
+    queryKey: ['resources'],
+    refetchInterval: RESOURCES_REFRESH_MS,
+  });
+}
+
+export function useTailscale(): UseQueryResult<TailscaleStatus> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<TailscaleStatus>(API_ROUTES.TAILSCALE, { signal }),
+    queryKey: ['tailscale'],
+  });
+}
+
+export function useBackups(): UseQueryResult<BackupSummary> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<BackupSummary>(API_ROUTES.BACKUPS, { signal }),
+    queryKey: [QUERY_KEYS.BACKUPS],
+  });
+}
+
+export function useRunBackup(): UseMutationResult<Job, Error, void> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<Job>(API_ROUTES.BACKUPS_RUN),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.JOBS] });
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.BACKUPS] });
+    },
+  });
+}
+
+const MEDIA_REFRESH_MS = 15_000;
+
+export function useMedia(): UseQueryResult<MediaSnapshot> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<MediaSnapshot>(API_ROUTES.MEDIA, { signal }),
+    queryKey: ['media'],
+    refetchInterval: MEDIA_REFRESH_MS,
+  });
+}
+
+export function useRecyclarr(): UseQueryResult<RecyclarrStatus> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<RecyclarrStatus>(API_ROUTES.RECYCLARR, { signal }),
+    queryKey: ['recyclarr'],
+  });
+}
+
+type DismissInput = {
+  dismiss: boolean;
+  key: string;
+  /** "fixed": hidden unless it happens again; "dismissed" (the default): hidden for good. */
+  kind?: 'dismissed' | 'fixed';
+  label: string;
+};
+
+/** Stop (or start again) being told about one issue; kept on the server, for every browser. */
+export function useDismiss(): UseMutationResult<unknown, Error, DismissInput> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ dismiss, key, kind = 'dismissed', label }: DismissInput) =>
+      apiPost(
+        dismiss ? API_ROUTES.DISMISS : API_ROUTES.DISMISS_RESTORE,
+        dismiss ? { key, kind, label } : { key, label },
+      ),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['drives'] });
+      void client.invalidateQueries({ queryKey: ['problems'] });
+    },
+  });
+}
+
+type FixResult = { created: string[]; fixed: string; problems: LogProblems };
+
+/** Apply the fix the daemon offered for one finding; it scans again afterwards. */
+export function useFixProblem(): UseMutationResult<FixResult, Error, string> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (key: string) => apiPost<FixResult>(API_ROUTES.PROBLEMS_FIX, { key }),
+    onSuccess: (result) => client.setQueryData(['problems'], result.problems),
+  });
+}
+
+const SELF_STALE_MS = 30 * 60_000;
+
+/** This app's version and whether a newer one is available. */
+export function useSelf(): UseQueryResult<SelfStatus> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<SelfStatus>(API_ROUTES.SELF, { signal }),
+    queryKey: ['self'],
+    staleTime: SELF_STALE_MS,
+  });
+}
+
+/** Look for a newer version now. */
+export function useCheckSelf(): UseMutationResult<SelfStatus, Error, void> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<SelfStatus>(`${API_ROUTES.SELF}?refresh=true`),
+    onSuccess: (data) => client.setQueryData(['self'], data),
+  });
+}
+
+/** Update this app; the daemon restarts once the job has finished. */
+export function useUpdateSelf(): UseMutationResult<Job, Error, void> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<Job>(API_ROUTES.SELF_UPDATE),
+    onSuccess: () => void client.invalidateQueries({ queryKey: [QUERY_KEYS.JOBS] }),
+  });
+}
+
+/** Whether explanations by Claude are available on this server. */
+export function useExplainStatus(): UseQueryResult<ExplainStatus> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<ExplainStatus>(API_ROUTES.EXPLAIN, { signal }),
+    queryKey: ['explain'],
+    staleTime: 60_000,
+  });
+}
+
+/** Ask Claude what one recurring error means; the answer is kept with the issue. */
+export function useExplain(): UseMutationResult<Explanation, Error, { again: boolean; key: string }> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { again: boolean; key: string }) => apiPost<Explanation>(API_ROUTES.PROBLEMS_EXPLAIN, input),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ['problems'] });
+      void client.invalidateQueries({ queryKey: ['explain'] });
+    },
+  });
+}
+
+const DRIVES_REFRESH_MS = 5 * 60_000;
+
+/** Each drive's health, from Scrutiny when it is installed. */
+export function useDrives(): UseQueryResult<DriveHealth> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<DriveHealth>(API_ROUTES.DRIVES, { signal }),
+    queryKey: ['drives'],
+    refetchInterval: DRIVES_REFRESH_MS,
+    staleTime: DRIVES_REFRESH_MS,
+  });
+}
+
+const PROBLEMS_STALE_MS = 10 * 60_000;
+
+/** Errors that keep recurring in the apps' logs. Reading them takes a few seconds, so it is kept. */
+export function useProblems(): UseQueryResult<LogProblems> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<LogProblems>(API_ROUTES.PROBLEMS, { signal }),
+    queryKey: ['problems'],
+    staleTime: PROBLEMS_STALE_MS,
+  });
+}
+
+/** Read the logs again now. */
+export function useRefreshProblems(): UseMutationResult<LogProblems, Error, void> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<LogProblems>(`${API_ROUTES.PROBLEMS}?refresh=true`),
+    onSuccess: (data) => client.setQueryData(['problems'], data),
+  });
+}
+
+type UninstallInput = { deleteData: boolean; repo: string; role: string };
+
+/** Remove an app's containers and, when asked, its settings folders. */
+export function useUninstallApp(): UseMutationResult<UninstallResult, Error, UninstallInput> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ deleteData, repo, role }: UninstallInput) =>
+      apiPost<UninstallResult>(API_ROUTES.appUninstall(repo, role), { delete_data: deleteData }),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.APPS] });
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.OVERVIEW] });
+    },
+  });
+}
+
+/** Restart the server itself. */
+export function useReboot(): UseMutationResult<{ rebooting: boolean }, Error, void> {
+  return useMutation({ mutationFn: () => apiPost<{ rebooting: boolean }>(API_ROUTES.REBOOT) });
+}
+
+const SEEDING_REFRESH_MS = 60_000;
+
+/** Seeding limits and finished torrents in qBittorrent. */
+export function useSeeding(): UseQueryResult<SeedingStatus> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<SeedingStatus>(API_ROUTES.SEEDING, { signal }),
+    queryKey: ['seeding'],
+    refetchInterval: SEEDING_REFRESH_MS,
+  });
+}
+
+type SeedingChoice = { days: number | null; ratio: number | null };
+
+export function useSaveSeeding(): UseMutationResult<SeedingStatus, Error, SeedingChoice> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (choice: SeedingChoice) => apiPut<SeedingStatus>(API_ROUTES.SEEDING, choice),
+    onSuccess: (status) => client.setQueryData(['seeding'], status),
+  });
+}
+
+/** Which quality profiles Sonarr and Radarr have, and how many items use each. */
+export function useRecyclarrUsage(enabled: boolean): UseQueryResult<RecyclarrUsage> {
+  return useQuery({
+    enabled,
+    queryFn: ({ signal }) => apiFetch<RecyclarrUsage>(API_ROUTES.RECYCLARR_USAGE, { signal }),
+    queryKey: ['recyclarr', 'usage'],
+  });
+}
+
+type AssignInput = { instance: string; profile_id: number };
+type AssignResult = { moved: number; profile: string; total: number; usage: RecyclarrUsage };
+
+/** Put every series or film of one app on one quality profile. */
+export function useAssignProfile(): UseMutationResult<AssignResult, Error, AssignInput> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: AssignInput) => apiPost<AssignResult>(API_ROUTES.RECYCLARR_ASSIGN, input),
+    onSuccess: (result) => client.setQueryData(['recyclarr', 'usage'], result.usage),
+  });
+}
+
+type RecyclarrSelection = { radarr: string[]; sonarr: string[] };
+
+export function useSaveRecyclarr(): UseMutationResult<{ backup: string | null }, Error, RecyclarrSelection> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (selection: RecyclarrSelection) => apiPut<{ backup: string | null }>(API_ROUTES.RECYCLARR, selection),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ['recyclarr'] }),
+  });
+}
+
+export function useRecyclarrSync(): UseMutationResult<Job, Error, { preview: boolean }> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { preview: boolean }) => apiPost<Job>(API_ROUTES.RECYCLARR_SYNC, body),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['recyclarr'] });
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.JOBS] });
+    },
+  });
+}
+
+export function useAutomation(): UseQueryResult<AutomationStatus> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<AutomationStatus>(API_ROUTES.AUTOMATION, { signal }),
+    queryKey: ['automation'],
+    refetchInterval: 30_000,
+  });
+}
+
+type AutomationChange = {
+  alerts?: Partial<AutomationSettings['alerts']>;
+  maintenance?: Partial<AutomationSettings['maintenance']>;
+};
+
+export function useSaveAutomation(): UseMutationResult<AutomationStatus, Error, AutomationChange> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (change: AutomationChange) => apiPut<AutomationStatus>(API_ROUTES.AUTOMATION, change),
+    onSuccess: (data) => client.setQueryData(['automation'], data),
+  });
+}
+
+export function useTestAlert(): UseMutationResult<{ message: string; ok: boolean }, Error, void> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<{ message: string; ok: boolean }>(API_ROUTES.AUTOMATION_TEST),
+    onSettled: () => void client.invalidateQueries({ queryKey: ['automation'] }),
+  });
+}
+
+export function useRunMaintenance(): UseMutationResult<{ started: boolean }, Error, void> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<{ started: boolean }>(API_ROUTES.AUTOMATION_MAINTENANCE),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['automation'] });
+      void client.invalidateQueries({ queryKey: [QUERY_KEYS.JOBS] });
+    },
+  });
+}
+
+export function useTailscaleServe(): UseMutationResult<TailscaleStatus, Error, boolean> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => apiPost<TailscaleStatus>(API_ROUTES.TAILSCALE_SERVE, { enabled }),
+    onSuccess: (data) => client.setQueryData(['tailscale'], data),
+  });
+}
+
+/** Films each Radarr has as disc images. */
+export function useDiscImages(): UseQueryResult<DiscImages> {
+  return useQuery({
+    queryFn: ({ signal }) => apiFetch<DiscImages>(API_ROUTES.DISC_IMAGES, { signal }),
+    queryKey: ['discimages'],
+  });
+}
+
+/** Have one Radarr find proper copies of its disc images; ``delete`` removes them first. */
+export function useReplaceDiscImages(): UseMutationResult<
+  DiscImagesResult,
+  Error,
+  { delete: boolean; instance: string }
+> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input) => apiPost<DiscImagesResult>(API_ROUTES.DISC_IMAGES_REPLACE, input),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ['discimages'] }),
+  });
+}

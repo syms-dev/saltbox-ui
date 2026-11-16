@@ -1,0 +1,507 @@
+"""Drive the installer wizard end to end with Textual's test pilot."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from textual.widgets import (
+    Button,
+    Collapsible,
+    Input,
+    Log,
+    RadioButton,
+    RadioSet,
+    Select,
+    SelectionList,
+    Static,
+)
+
+from saltbox_ui.installer import InstallerSession
+from saltbox_ui.installer.plan import InstallPlan
+from saltbox_ui.layout import Layout
+from saltbox_ui.plex import Pin, PlexError, read_plex_facts
+from saltbox_ui.rclone import RcloneService
+from saltbox_ui.tui.app import STEPS, InstallerApp
+from saltbox_ui.tui.installer.rclone_screen import RcloneQuestionScreen
+from saltbox_ui.tui.installer.screens import (
+    AccountScreen,
+    AppsScreen,
+    DoneScreen,
+    InstallScreen,
+    PlexScreen,
+    PreflightScreen,
+    PreinstallScreen,
+    ReviewScreen,
+    StorageScreen,
+    WelcomeScreen,
+)
+from saltbox_ui.tui.widgets import CheckRow, FilterableSelection
+from saltbox_ui.yamlio import load_plain
+from tests.test_preflight import good_probe
+
+GIB = 1024**3
+
+
+class FakePlex:
+    """plex.tv stand-in: the code is linked on the second check."""
+
+    instances: list[FakePlex] = []
+
+    def __init__(self, *, fail_create: bool = False, polls_before_link: int = 1):
+        self.client_id = f"Saltboxtest{len(FakePlex.instances):04d}"
+        self.fail_create = fail_create
+        self.polls_before_link = polls_before_link
+        self.checks = 0
+        FakePlex.instances.append(self)
+
+    def create_pin(self) -> Pin:
+        if self.fail_create:
+            raise PlexError("cannot reach plex.tv: offline")
+        return Pin(id=42, code="AB12", client_id=self.client_id)
+
+    def check_pin(self, pin: Pin) -> str | None:
+        self.checks += 1
+        return "plex-token" if self.checks > self.polls_before_link else None
+
+    def username(self, token: str) -> str:
+        assert token == "plex-token"
+        return "seedling"
+
+
+@pytest.fixture(autouse=True)
+def fast_plex_polling(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(PlexScreen, "POLL_SECONDS", 0.02)
+    FakePlex.instances = []
+
+
+@pytest.fixture
+def session(scratch_layout: Layout, fake_sb: Path, fake_rclone: Path, tmp_path: Path):
+    def rclone_factory(user: str) -> RcloneService:
+        return RcloneService(fake_rclone, config_path=tmp_path / "rclone.conf")
+
+    return InstallerSession(scratch_layout, rclone_factory=rclone_factory, plex_factory=FakePlex)
+
+
+async def link_plex(app: InstallerApp, pilot) -> None:
+    assert isinstance(app.screen, PlexScreen)
+    assert app.screen.query_one("#next", Button).disabled
+    await click(pilot, "#plex_link")
+    await settle(app, pilot)
+    assert "Linked to Plex as seedling" in str(app.screen.query_one("#plex_status", Static).content)
+    assert not app.screen.query_one("#next", Button).disabled
+
+
+def make_app(session: InstallerSession, probe=None, ipv6: bool = False) -> InstallerApp:
+    return InstallerApp(
+        session, probe_factory=lambda layout: probe or good_probe(), ipv6_check=lambda: ipv6
+    )
+
+
+async def settle(app: InstallerApp, pilot) -> None:
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+
+
+async def click(pilot, selector: str) -> None:
+    """Click, then wait out Button's active effect, during which it ignores clicks."""
+    await pilot.click(selector)
+    await pilot.pause(0.3)
+
+
+async def next_step(app: InstallerApp, pilot) -> None:
+    await click(pilot, "#next")
+
+
+def set_input(app: InstallerApp, widget_id: str, value: str) -> None:
+    app.screen.query_one(f"#{widget_id}", Input).value = value
+
+
+async def pick_radio(app: InstallerApp, radio_set: str, name: str, pilot) -> None:
+    for button in app.screen.query_one(f"#{radio_set}", RadioSet).query(RadioButton):
+        if button.name == name:
+            button.value = True
+    await pilot.pause()
+
+
+async def test_full_wizard(session: InstallerSession) -> None:
+    app = make_app(session)
+    async with app.run_test(size=(120, 50)) as pilot:
+        assert isinstance(app.screen, WelcomeScreen)
+        assert "#resume" not in [f"#{b.id}" for b in app.screen.query(Button)]
+        await next_step(app, pilot)
+
+        assert isinstance(app.screen, PreflightScreen)
+        await settle(app, pilot)
+        rows = app.screen.query(CheckRow)
+        assert len(rows) >= 10
+        statuses = {row.check_id: row.status for row in rows}
+        assert statuses.pop("ipv6") == "skip"  # informational only
+        assert set(statuses.values()) == {"pass"}
+        assert not app.screen.query_one("#next", Button).disabled
+        await next_step(app, pilot)
+
+        assert isinstance(app.screen, AccountScreen)
+        set_input(app, "user_name", "seed")
+        set_input(app, "user_pass", "short")
+        set_input(app, "user_pass2", "short")
+        set_input(app, "domain", "example.com")
+        set_input(app, "email", "me@example.com")
+        await next_step(app, pilot)
+        assert isinstance(app.screen, AccountScreen)  # blocked: password too short
+        set_input(app, "user_pass", "a-long-password-123")
+        set_input(app, "user_pass2", "a-long-password-123")
+        await next_step(app, pilot)
+
+        assert app.screen.TITLE == "DNS and certificates"
+        assert app.screen.query_one("#cf_token_box").display
+        assert not app.screen.query_one("#manual_box").display
+        await next_step(app, pilot)
+        assert app.screen.TITLE == "DNS and certificates"  # blocked: token missing
+        set_input(app, "cf_token", "cf-token")
+        await next_step(app, pilot)
+
+        assert isinstance(app.screen, AppsScreen)
+        await next_step(app, pilot)
+
+        assert app.screen.TITLE == "Advanced"
+        set_input(app, "timezone", "Europe/Copenhagen")
+        await next_step(app, pilot)
+
+        assert isinstance(app.screen, ReviewScreen)
+        await next_step(app, pilot)
+        assert session.layout.config_file("accounts").exists()
+        accounts = load_plain(session.layout.config_file("accounts"))
+        assert accounts["user"]["name"] == "seed"
+        assert accounts["cloudflare"]["scoped_token"] == "cf-token"
+
+        assert isinstance(app.screen, PreinstallScreen)
+        assert app.screen.query_one("#next", Button).disabled
+        await click(pilot, "#run")
+        await settle(app, pilot)
+        assert "preinstall completed" in str(app.screen.query_one("#status", Static).content)
+        assert session.plan.phase == "storage"
+        assert "install preinstall" in "\n".join(app.screen.query_one("#log", Log).lines)
+        await next_step(app, pilot)
+
+        assert isinstance(app.screen, StorageScreen)
+        assert not app.screen.query_one("#remote_box").display
+        await next_step(app, pilot)
+
+        await link_plex(app, pilot)
+        await next_step(app, pilot)
+
+        assert isinstance(app.screen, InstallScreen)
+        assert "sb install saltbox" in str(app.screen.query(".hint").first(Static).content)
+        await click(pilot, "#run")
+        await settle(app, pilot)
+        assert session.plan.phase == "done"
+        await next_step(app, pilot)
+
+        assert isinstance(app.screen, DoneScreen)
+        text = "\n".join(str(s.content) for s in app.screen.query(Static))
+        assert "https://plex.example.com" in text
+        assert "https://login.example.com" in text
+        await next_step(app, pilot)  # Exit
+    assert app.return_code == 0
+
+    settings = load_plain(session.layout.config_file("settings"))
+    assert settings["rclone"]["enabled"] == "no"
+    adv = load_plain(session.layout.config_file("adv_settings"))
+    assert adv["system"]["timezone"] == "Europe/Copenhagen"
+    assert InstallPlan.load(session.plan_path).phase == "done"
+    facts = read_plex_facts(session.layout, "plex")
+    assert facts == {"client_identifier": "Saltboxtest0000", "token": "plex-token"}
+
+
+async def test_preflight_failure_blocks(session: InstallerSession) -> None:
+    app = make_app(session, probe=good_probe(virt="lxc"))
+    async with app.run_test(size=(120, 50)) as pilot:
+        await next_step(app, pilot)
+        await settle(app, pilot)
+        assert isinstance(app.screen, PreflightScreen)
+        rows = {row.check_id: row for row in app.screen.query(CheckRow)}
+        assert rows["lxc"].status == "fail"
+        assert app.screen.query_one("#next", Button).disabled
+        summary = str(app.screen.query_one("#preflight-summary", Static).content)
+        assert "1 failed" in summary
+
+
+async def test_resume_after_preinstall(session: InstallerSession) -> None:
+    session.plan = InstallPlan(
+        phase="storage",
+        user_name="seed",
+        user_pass="a-long-password-123",
+        domain="example.com",
+        email="me@example.com",
+        cloudflare_token="cf-token",
+        preinstall_started_at=1.0,
+    )
+    session.save()
+    app = make_app(session)
+    async with app.run_test(size=(120, 50)) as pilot:
+        assert isinstance(app.screen, WelcomeScreen)
+        assert app.screen.query_one("#resume", Button)
+        await click(pilot, "#resume")
+        assert isinstance(app.screen, StorageScreen)
+        assert app.step_index == STEPS.index(StorageScreen)
+
+
+async def test_discard_previous_plan(session: InstallerSession) -> None:
+    session.plan.phase = "preinstall"
+    session.save()
+    app = make_app(session)
+    async with app.run_test(size=(120, 50)) as pilot:
+        await click(pilot, "#discard")
+        assert not session.plan_path.exists()
+        assert session.plan.phase == "collect"
+        assert app.screen.query_one("#resume", Button).disabled
+
+
+async def test_storage_creates_remote_through_rclone(session: InstallerSession) -> None:
+    session.plan = InstallPlan(
+        phase="storage",
+        user_name="seed",
+        user_pass="a-long-password-123",
+        domain="example.com",
+        email="me@example.com",
+        cloudflare_token="cf-token",
+    )
+    session.save()
+    app = make_app(session)
+    async with app.run_test(size=(120, 60)) as pilot:
+        await click(pilot, "#resume")
+        assert isinstance(app.screen, StorageScreen)
+        storage = app.screen
+        await pick_radio(app, "storage_mode", "create", pilot)
+        await settle(app, pilot)
+        assert storage.query_one("#remote_box").display
+        assert "no remotes" in str(storage.query_one("#remote_status", Static).content)
+        select = storage.query_one("#new_type", Select)
+        select.value = "drive"
+        set_input(app, "new_name", "google")
+        await click(pilot, "#create")
+        await settle(app, pilot)
+
+        modal = app.screen
+        assert isinstance(modal, RcloneQuestionScreen)
+        assert modal.question is not None
+        assert modal.question.name == "client_id"
+        await click(pilot, "#default")  # accept the empty client id
+        await settle(app, pilot)
+        # config_is_local is answered automatically; the token question comes next.
+        assert modal.question.name == "config_token"
+        authorize = str(modal.query_one("#authorize", Static).content)
+        assert 'rclone authorize "drive"' in authorize
+        await click(pilot, "#submit")  # empty token: the modal refuses, we stay
+        await settle(app, pilot)
+        assert isinstance(app.screen, RcloneQuestionScreen)
+        assert "required" in str(modal.query_one("#error", Static).content)
+        modal.query_one("#answer", Input).value = "{token}"
+        await click(pilot, "#submit")
+        await settle(app, pilot)
+
+        assert app.screen is storage
+        assert [r.remote for r in session.plan.remotes] == ["google"]
+        assert "google created" in str(storage.query_one("#remote_status", Static).content)
+        await click(pilot, "#mkmedia_0")
+        await settle(app, pilot)
+        assert session.rclone().list_dirs("google") == ["Media"]
+
+        await next_step(app, pilot)
+        await link_plex(app, pilot)
+        await next_step(app, pilot)
+        assert isinstance(app.screen, InstallScreen)
+        assert session.plan.storage_mode == "create"
+        assert session.plan.rclone_enabled
+        await click(pilot, "#run")
+        await settle(app, pilot)
+    settings = load_plain(session.layout.config_file("settings"))
+    assert settings["rclone"]["enabled"] == "yes"
+    assert settings["rclone"]["remotes"][0]["remote"] == "google"
+    assert settings["rclone"]["remotes"][0]["settings"]["template"] == "google"
+
+
+async def test_storage_existing_without_remotes_blocks(session: InstallerSession) -> None:
+    session.plan = InstallPlan(phase="storage", user_name="seed", domain="example.com")
+    session.save()
+    app = make_app(session)
+    async with app.run_test(size=(120, 50)) as pilot:
+        await click(pilot, "#resume")
+        await pick_radio(app, "storage_mode", "existing", pilot)
+        await settle(app, pilot)
+        await next_step(app, pilot)
+        assert isinstance(app.screen, StorageScreen)  # blocked: nothing in rclone.conf
+
+
+async def test_done_screen_enables_web(
+    session: InstallerSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session.plan = InstallPlan(phase="done", user_name="seed", domain="example.com")
+    session.save()
+    calls: list[str] = []
+
+    def fake_enable() -> dict:
+        calls.append("enable")
+        return {"url": "https://saltbox.example.com", "started": True}
+
+    monkeypatch.setattr(session, "enable_web", fake_enable)
+    app = make_app(session)
+    async with app.run_test(size=(120, 50)) as pilot:
+        app.show_step(STEPS.index(DoneScreen))  # a finished install is not resumable
+        await pilot.pause()
+        assert isinstance(app.screen, DoneScreen)
+        await click(pilot, "#enable_web")
+        await settle(app, pilot)
+        assert calls == ["enable"]
+        status = str(app.screen.query_one("#web_status", Static).content)
+        assert "https://saltbox.example.com" in status
+        assert app.screen.query_one("#enable_web", Button).disabled
+
+
+async def test_plex_step_blocks_until_linked(session: InstallerSession) -> None:
+    session.plan = InstallPlan(phase="storage", user_name="seed", domain="example.com")
+    session.save()
+    app = make_app(session)
+    async with app.run_test(size=(120, 50)) as pilot:
+        app.show_step(STEPS.index(PlexScreen))
+        await pilot.pause()
+        assert app.screen.query_one("#next", Button).disabled
+        await next_step(app, pilot)
+        assert isinstance(app.screen, PlexScreen)
+        assert "Link your Plex account" in (app.screen.commit() or "")
+
+
+async def test_plex_step_shows_code_and_cancels(session: InstallerSession) -> None:
+    session._plex_factory = lambda: FakePlex(polls_before_link=10_000)
+    session.plan = InstallPlan(phase="storage", user_name="seed", domain="example.com")
+    app = make_app(session)
+    async with app.run_test(size=(120, 50)) as pilot:
+        app.show_step(STEPS.index(PlexScreen))
+        await pilot.pause()
+        await click(pilot, "#plex_link")
+        code = str(app.screen.query_one("#plex_code", Static).content)
+        assert "plex.tv/link" in code and "AB12" in code
+        assert "clientID=Saltboxtest0000" in code
+        await click(pilot, "#plex_cancel")
+        await settle(app, pilot)
+        assert "Cancelled" in str(app.screen.query_one("#plex_status", Static).content)
+        assert not app.screen.query_one("#plex_code").display
+        assert app.screen.query_one("#next", Button).disabled
+        assert session.plan.plex_token == ""
+
+
+async def test_plex_step_reports_errors(session: InstallerSession) -> None:
+    session._plex_factory = lambda: FakePlex(fail_create=True)
+    session.plan = InstallPlan(phase="storage", user_name="seed", domain="example.com")
+    app = make_app(session)
+    async with app.run_test(size=(120, 50)) as pilot:
+        app.show_step(STEPS.index(PlexScreen))
+        await pilot.pause()
+        await click(pilot, "#plex_link")
+        await settle(app, pilot)
+        status = str(app.screen.query_one("#plex_status", Static).content)
+        assert "offline" in status
+        assert not app.screen.query_one("#plex_link", Button).disabled
+
+
+async def test_plex_step_skipped_without_plex(session: InstallerSession) -> None:
+    session.plan = InstallPlan(phase="storage", profile="feederbox", user_name="seed")
+    app = make_app(session)
+    async with app.run_test(size=(120, 50)) as pilot:
+        app.show_step(STEPS.index(PlexScreen))
+        await pilot.pause()
+        assert not app.screen.query("#plex_link")
+        await next_step(app, pilot)
+        assert isinstance(app.screen, InstallScreen)
+
+
+async def test_apps_step_refuses_jellyfin(session: InstallerSession) -> None:
+    app = make_app(session)
+    async with app.run_test(size=(120, 60)) as pilot:
+        app.show_step(STEPS.index(AppsScreen))
+        await pilot.pause()
+        servers = app.screen.query_one("#media_servers", SelectionList)
+        servers.select("jellyfin")
+        await pilot.pause()
+        await next_step(app, pilot)
+        assert isinstance(app.screen, AppsScreen)
+        assert "Jellyfin" in str(app.screen.query_one("#step-error", Static).content)
+
+
+async def test_apps_step_shows_included_apps_and_drops_duplicates(
+    session: InstallerSession,
+) -> None:
+    app = make_app(session)
+    async with app.run_test(size=(120, 60)) as pilot:
+        app.show_step(STEPS.index(AppsScreen))
+        await pilot.pause()
+        included = str(app.screen.query_one("#profile_includes", Static).content)
+        assert "sonarr" in included and "radarr" in included and "autoscan" in included
+        extras = app.screen.query_one("#extra_apps", FilterableSelection)
+        extras.selected_values.update({"sonarr", "bazarr"})
+        await next_step(app, pilot)
+        assert session.plan.extra_apps == ["bazarr"]
+        assert session.plan.install_tags() == ["saltbox", "bazarr"]
+
+
+def test_extra_app_choices_hide_tools_and_label_included(repo_layout) -> None:
+    from saltbox_ui.catalog import Catalog
+    from saltbox_ui.tui.installer.screens import extra_app_choices, extra_app_label
+
+    apps = extra_app_choices(Catalog(repo_layout).apps())
+    roles = [a.role for a in apps]
+    for hidden in ("mainline", "plex_db", "arr_db", "cloudplow_disable", "authelia", "redis"):
+        assert hidden not in roles, hidden
+    for offered in ("bazarr", "unpackerr", "scrutiny", "dozzle", "ddns", "sonarr"):
+        assert offered in roles, offered
+    assert "plex" not in roles  # picked with the media server list instead
+    titles = [a.title.lower() for a in apps]
+    assert titles == sorted(titles)
+    bazarr = next(a for a in apps if a.role == "bazarr")
+    assert extra_app_label(bazarr).startswith("Bazarr  ·  ")
+
+
+@pytest.mark.parametrize("ipv6", [False, True])
+async def test_dns_step_checks_ipv6_before_enabling_it(
+    session: InstallerSession, ipv6: bool
+) -> None:
+    from textual.widgets import Checkbox
+
+    session.plan.cloudflare_token = "cf-token"
+    app = make_app(session, ipv6=ipv6)
+    async with app.run_test(size=(120, 60)) as pilot:
+        app.show_step(STEPS.index(AppsScreen) - 1)
+        await pilot.pause()
+        assert app.screen.TITLE == "DNS and certificates"
+        app.screen.query_one("#ipv6", Checkbox).value = True
+        await next_step(app, pilot)
+        if ipv6:
+            assert isinstance(app.screen, AppsScreen)
+            assert session.plan.dns_ipv6 is True
+        else:
+            assert app.screen.TITLE == "DNS and certificates"
+            assert "no working IPv6" in str(app.screen.query_one("#step-error", Static).content)
+            assert session.plan.dns_ipv6 is False
+
+
+async def test_extras_hide_apps_the_install_type_includes(session: InstallerSession) -> None:
+    app = make_app(session)
+    async with app.run_test(size=(120, 60)) as pilot:
+        app.show_step(STEPS.index(AppsScreen))
+        await pilot.pause()
+        extras = app.screen.query_one("#extra_apps", FilterableSelection)
+        offered = {value for _, value in extras.items}
+        assert "bazarr" in offered
+        assert not offered & {"sonarr", "radarr", "autoscan", "seerr", "tautulli"}
+        extras.selected_values.add("bazarr")
+
+        await pick_radio(app, "profile", "core", pilot)
+        offered = {value for _, value in extras.items}
+        assert {"sonarr", "radarr", "bazarr"} <= offered
+        assert "bazarr" in extras.selected_values  # kept across the switch
+        assert str(len(offered)) in str(app.screen.query_one("#extras_box", Collapsible).title)
+
+        extras.selected_values.add("sonarr")
+        await pick_radio(app, "profile", "saltbox", pilot)
+        assert "sonarr" not in extras.selected_values  # dropped: saltbox includes it
