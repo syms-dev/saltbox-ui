@@ -3,6 +3,44 @@
 Notable changes to Saltbox UI. Versions match the GitHub releases; dates are UTC.
 This file is kept by hand so the history reads the way the work actually went.
 
+## [0.3.0] — 2026-11-17
+
+A redesign: a new look, and a menu built around where people look for things.
+
+### Changed
+
+- **A grouped menu.** Home, Updates and Activity; Apps (Installed, Discover);
+  Media (Library, Connect apps); Server (Health, Storage, Network & access,
+  Backups, Automation); Settings (Config files). Updates and Health carry a
+  count when something is waiting.
+- **System is split up.** It held a dozen unrelated things. Load, log problems,
+  drive health and Saltbox's services are now on **Health**; disks and mounts
+  on **Storage**; Tailscale on **Network & access**; backups on **Backups**.
+  Old links to `/system` land on the right page.
+- **One Updates page** for everything that can be updated: apps with a newer
+  image (each with its version change and its own Update button), Saltbox's
+  `sb update`, and Saltbox UI. They used to be on two different pages.
+- **Phones get every page.** The bottom bar is Home, Apps, Updates, Activity
+  and More; More opens the whole menu. Library, Connect apps and Automation
+  used to be reachable only through links on other pages.
+- **Home starts with the server at a glance:** uptime, CPU, memory and storage,
+  each leading to the page with the detail.
+- **A new look ("ops terminal"):** near-black or paper-white surfaces, hairline
+  borders, a green accent, page titles and labels in JetBrains Mono and text in
+  Inter. It follows the device's light or dark setting. Both fonts are bundled
+  (SIL Open Font License), so the page still loads nothing from elsewhere.
+
+### Accessibility
+
+- The theme's text colours meet 4.5:1 contrast against the surfaces they are
+  used on, in both themes, and form fields have a 3:1 edge.
+- A "Skip to content" link, and after each page change the reading position
+  moves to the page's content rather than staying in the menu.
+- Buttons and fields grow to 44 px on touch screens.
+- The menu says which page is current to screen readers, and the counts are
+  read out in words ("6 updates available").
+- Reduced motion turns off the remaining animations.
+
 ## [0.2.8] — 2026-11-17
 
 ### Added
