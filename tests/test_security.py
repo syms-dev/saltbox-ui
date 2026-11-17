@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import stat
 import struct
@@ -189,6 +190,9 @@ def test_pages_cannot_be_framed_and_answers_are_not_cached(
         response = client.get(path, headers=headers)
         policy = response.headers["content-security-policy"]
         assert "frame-ancestors 'none'" in policy and "script-src 'self'" in policy, path
+        # no image from another origin: app icons are bundled, so none carries the sign-on
+        # cookie to an app and none can be used to send data out
+        assert "img-src 'self' data:;" in policy, path
         assert "unsafe-inline" not in policy and "unsafe-eval" not in policy
         assert response.headers["x-frame-options"] == "DENY"
         assert response.headers["x-content-type-options"] == "nosniff"
@@ -1226,3 +1230,31 @@ def test_the_installer_strips_terminal_escape_sequences() -> None:
     assert "\t" in cleaned and "\n" in cleaned and "ok" in cleaned and "bad" in cleaned
     assert "\x1b" not in plain.literal(hostile).plain
     assert "\x1b" not in str(plain.Static(hostile).render())
+
+
+def test_app_icons_are_bundled_raster_images_that_match_the_manifest() -> None:
+    """App icons ship with the web app (scripts/build_icons.py) instead of being fetched from
+    each app, which handed the sign-on cookie to every app. Only re-encoded WebP images ship,
+    never an SVG (which can carry script), and the manifest names exactly the files there."""
+    root = Path(__file__).resolve().parent.parent
+    icons = root / "web" / "public" / "icons"
+    manifest = (root / "web" / "src" / "lib" / "app-icons.ts").read_text()
+    listed = set(re.findall(r"^  '([a-z0-9_]+)',$", manifest, re.M))
+    files = {path.stem for path in icons.glob("*.webp")}
+    assert listed and listed == files
+    assert not list(icons.glob("*.svg")) and (icons / "LICENSE").is_file()
+    for path in icons.glob("*.webp"):
+        data = path.read_bytes()
+        assert data[:4] == b"RIFF" and data[8:12] == b"WEBP", path.name
+        assert len(data) < 64 * 1024, path.name
+
+
+def test_a_bundled_icon_is_served_from_the_daemons_own_origin(scratch_layout: Layout) -> None:
+    web = scratch_layout.state_dir.parent / "web"
+    (web / "icons").mkdir(parents=True)
+    (web / "index.html").write_text("<!doctype html><title>x</title>")
+    (web / "icons" / "plex.webp").write_bytes(b"RIFF\x00\x00\x00\x00WEBPVP8 ")
+    client = TestClient(create_app(services=Services(scratch_layout, web_dir=web)))
+    answer = client.get("/icons/plex.webp")
+    assert answer.status_code == 200 and answer.headers["content-type"] == "image/webp"
+    assert answer.headers["x-content-type-options"] == "nosniff"

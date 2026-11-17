@@ -12,14 +12,16 @@ describe('data that is not what the page expects', () => {
     render(
       <>
         <OpenLinks urls={['https://a b', 'not a url', 'https://sonarr.example.com']} />
-        <AppAvatar title="Sonarr" url="https://a b" />
-        <AppAvatar title="Radarr" url="javascript:alert(1)" />
-        <AppAvatar title="Plex" url="https://plex.example.com/web" />
+        <AppAvatar role="../../etc/passwd" title="Odd" />
+        <AppAvatar role="not-a-known-app" title="Radarr" />
+        <AppAvatar role="plex" title="Plex" />
       </>,
     );
     expect(screen.getByRole('link', { name: 'Open sonarr.example.com' })).toBeInTheDocument();
+    // Only a bundled icon, from this origin; never a path built from data, never the app's own
+    // address (the browser would send the sign-on cookie to it).
     const icons = Array.from(document.querySelectorAll('img')).map((img) => img.getAttribute('src'));
-    expect(icons).toEqual(['https://plex.example.com/favicon.ico']);
+    expect(icons).toEqual(['/icons/plex.webp']);
   });
 
   it('a page that cannot be drawn leaves a way out instead of a blank screen', () => {

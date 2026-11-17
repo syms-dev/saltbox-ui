@@ -90,7 +90,7 @@ function InstalledRow({ app }: { app: App }): React.ReactNode {
   return (
     <li className={styles['row']}>
       <Link aria-label={`${app.title} details`} className={styles['rowMain']} to={`/apps/${app.repo}/${app.role}`}>
-        <AppAvatar title={app.title} url={url} />
+        <AppAvatar role={app.role} title={app.title} />
         <span className={styles['rowText']}>
           <span className={styles['rowTitle']}>
             {app.title}
@@ -331,7 +331,7 @@ function Discover({ apps }: { apps: App[] }): React.ReactNode {
           {shown.map((app) => (
             <li className={`card ${styles['entry']}`} key={`${app.repo}/${app.role}`}>
               <div className={styles['entryHead']}>
-                <AppAvatar title={app.title} />
+                <AppAvatar role={app.role} title={app.title} />
                 <div className={styles['entryTitle']}>
                   <Link to={`/apps/${app.repo}/${app.role}`}>{app.title}</Link>
                   <span className="muted small">{subcategory(app) || 'App'}</span>

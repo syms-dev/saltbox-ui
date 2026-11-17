@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { APP_ICONS } from '../lib/app-icons';
 import styles from './app-avatar.module.css';
 
 const HUES = 360;
@@ -21,28 +22,23 @@ export function initials(title: string): string {
   return (words.length > 1 ? first.charAt(0) + second.charAt(0) : first.slice(0, 2)).toUpperCase();
 }
 
-/** The https origin of an app's address; null for anything that is not one. */
-function originOf(url: string): string | null {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === 'https:' ? parsed.origin : null;
-  } catch {
-    return null;
-  }
+/** The icon bundled for an app's role (see scripts/build_icons.py); null when there is none. */
+export function iconFor(role: string | undefined): string | null {
+  return role !== undefined && APP_ICONS.has(role) ? `${import.meta.env.BASE_URL}icons/${role}.webp` : null;
 }
 
-type AppAvatarProps = { size?: 'lg' | 'md' | 'sm'; title: string; url?: string | undefined };
+type AppAvatarProps = { size?: 'lg' | 'md' | 'sm'; title: string; role?: string | undefined };
 
 /**
- * The app's own icon, fetched from the app through Traefik (the browser already holds the
- * Authelia session for the whole domain), over a coloured monogram that shows when the
- * app has no icon or cannot be reached. Nothing is loaded from outside the server.
+ * The app's icon, bundled with this web app and served from its own origin, over a
+ * coloured monogram that shows when there is no icon for the app. The icon is never
+ * fetched from the app itself: the browser would send the sign-on cookie with that
+ * request, handing the admin's session to every app whenever this page was opened.
  */
-export function AppAvatar({ size = 'md', title, url }: AppAvatarProps): React.ReactNode {
+export function AppAvatar({ size = 'md', title, role }: AppAvatarProps): React.ReactNode {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
-  const origin = url === undefined || failed ? null : originOf(url);
-  const icon = origin === null ? null : `${origin}/favicon.ico`;
+  const icon = failed ? null : iconFor(role);
   return (
     <span
       aria-hidden="true"

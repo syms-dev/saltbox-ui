@@ -565,7 +565,7 @@ export function AppPage(): React.ReactNode {
         <ArrowLeft aria-hidden="true" size={14} /> Apps
       </Link>
       <header className={styles['header']}>
-        <AppAvatar size="lg" title={data.app.title} url={url} />
+        <AppAvatar role={role} size="lg" title={data.app.title} />
         <div className={styles['headText']}>
           <h1 className={styles['flush']}>
             {data.app.title}

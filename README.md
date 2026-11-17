@@ -121,11 +121,11 @@ to, and after a boot shows the containers coming back.
 
 ## Status: what has and hasn't been checked
 
-Version 0.2.3. Treat it as a beta.
+Version 0.2.4. Treat it as a beta.
 
 | Check | Result |
 | --- | --- |
-| Python tests (pytest) | 402 tests; pass on Python 3.12 and 3.14 |
+| Python tests (pytest) | 404 tests; pass on Python 3.12 and 3.14 |
 | Web unit tests (Vitest) | 95 tests pass |
 | End-to-end tests (Playwright, Chromium) | 66 tests pass: every flow on desktop, every page at phone and tablet width, failing on any console error |
 | Package | CI builds the wheel, installs it in a clean environment and loads the web app from it |
@@ -204,7 +204,7 @@ Install the wheel from this repository's Releases page with pipx:
 
 ```
 sudo apt install -y pipx
-V=0.2.3
+V=0.2.4
 sudo PIPX_HOME=/usr/local/pipx PIPX_BIN_DIR=/usr/local/bin pipx install \
   "https://github.com/syms-dev/saltbox-ui/releases/download/v$V/saltbox_ui-$V-py3-none-any.whl"
 ```
@@ -307,8 +307,10 @@ Tailscale admin console.
 
 A request that changes anything is refused when the browser says another site
 started it, so a page on a sibling subdomain (which shares the sign-on cookie)
-can't start jobs. The page can't be put in a frame, loads scripts and styles
-only from the server itself, and API answers are never cached.
+can't start jobs. The page can't be put in a frame, loads scripts, styles and
+images only from the server itself, and API answers are never cached. App
+icons are bundled with the web app rather than fetched from each app, because
+the browser would send the sign-on cookie along with such a request.
 
 ### Containers aren't trusted
 
@@ -468,3 +470,8 @@ GPL-3.0-only, the same license as Saltbox. The app catalog
 (`saltbox_ui/catalog/data/docs.json`) are generated from the Saltbox
 documentation. Saltbox is the work of the saltyorg contributors; this project
 only drives it.
+
+The app icons in `web/public/icons` come from
+[dashboard-icons](https://github.com/homarr-labs/dashboard-icons) (Apache-2.0,
+license alongside them), resized by `scripts/build_icons.py`. Each logo is a
+trademark of its own project and is used only to show which app is which.

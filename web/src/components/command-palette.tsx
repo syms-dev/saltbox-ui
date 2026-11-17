@@ -173,7 +173,7 @@ function useCommands(query: string, close: () => void): Command[] {
       commands.push({
         group: 'Open',
         hint: hostOf(url),
-        icon: <AppAvatar size="sm" title={app.title} url={url} />,
+        icon: <AppAvatar role={app.role} size="sm" title={app.title} />,
         id: `open:${app.repo}/${app.role}`,
         keywords: app.role,
         label: `Open ${app.title}`,
@@ -189,7 +189,7 @@ function useCommands(query: string, close: () => void): Command[] {
       commands.push({
         group: app.installed ? 'Manage' : 'Install',
         hint: app.installed ? 'installed' : app.repo === 'sandbox' ? 'sandbox app' : 'not installed',
-        icon: <AppAvatar size="sm" title={app.title} />,
+        icon: <AppAvatar role={app.role} size="sm" title={app.title} />,
         id: `app:${app.repo}/${app.role}`,
         keywords: `${app.role} ${app.categories.join(' ')} ${app.summary}`,
         label: app.title,

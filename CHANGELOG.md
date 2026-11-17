@@ -3,6 +3,26 @@
 Notable changes to Saltbox UI. Versions match the GitHub releases; dates are UTC.
 This file is kept by hand so the history reads the way the work actually went.
 
+## [0.2.4] — 2026-11-17
+
+### Security
+
+- **App icons are bundled with the web app** instead of being fetched from each
+  app. Loading `https://<app>.<domain>/favicon.ico` made the browser send the
+  domain-wide sign-on cookie to every app whenever Home was opened, so a
+  compromised app image could have read the admin's session. 191 of the 234
+  catalog apps have an icon, taken from
+  [dashboard-icons](https://github.com/homarr-labs/dashboard-icons) at a pinned
+  commit and re-encoded as small WebP images (never SVG); the rest keep their
+  monogram. This closes the known limitation listed under 0.2.3.
+- **The page now loads images only from its own origin** (`img-src 'self'
+  data:`), which also removes a ready channel for sending data out.
+
+### Changed
+
+- Icons now also show for apps that are not installed yet (the catalog, and the
+  Manage and Install entries in search), where there was only a monogram before.
+
 ## [0.2.3] — 2026-11-17
 
 A security and robustness pass. An independent, whole-codebase review drove the
@@ -50,13 +70,11 @@ a test.
   Ansible honours; and a status poll can no longer make a job start fail by
   racing it for the job lock.
 
-### Known limitation
+### Known limitation (fixed in 0.2.4)
 
-- App icons are still loaded from each app's own address, which sends the
+- App icons were still loaded from each app's own address, which sends the
   browser's domain-wide sign-on cookie to that app; a compromised app image could
-  read it. Closing this needs the daemon to serve the icons itself, and is
-  planned for a later release. Running only trusted app images avoids it in the
-  meantime.
+  read it.
 
 ## [0.2.2] — 2026-11-16
 

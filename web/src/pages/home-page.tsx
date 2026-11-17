@@ -184,7 +184,7 @@ function Launcher({ apps }: { apps: App[] }): React.ReactNode {
             const pinned = isPinned(id(app));
             const body = (
               <>
-                <AppAvatar title={app.title} url={url} />
+                <AppAvatar role={app.role} title={app.title} />
                 <span className={styles['tileText']}>
                   <span className={styles['tileTitle']}>{app.title}</span>
                   <StatusDot health={health} />
