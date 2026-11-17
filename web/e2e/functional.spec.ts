@@ -283,6 +283,7 @@ test.describe('navigation and search', () => {
     await page.goto('/');
     for (const [name, heading] of [
       ['Apps', 'Apps'],
+      ['Library', 'Library'],
       ['Activity', 'Activity'],
       ['System', 'System'],
       ['Connect apps', 'Connect apps'],
@@ -532,7 +533,7 @@ test.describe('system and setup', () => {
   });
 
   test('sets up Recyclarr profiles and syncs them', async ({ page }) => {
-    await page.goto('/connect');
+    await page.goto('/library');
     const card = page.getByRole('region', { name: 'Quality profiles' });
     await expect(card.getByRole('checkbox', { name: /WEB-1080p/ })).toBeChecked();
     await expect(card.getByRole('button', { name: 'Sync now' })).toBeDisabled(); // nothing saved yet
@@ -544,7 +545,7 @@ test.describe('system and setup', () => {
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('docker exec recyclarr recyclarr sync --preview');
     expect(await jobOutcome(page)).toBe('succeeded');
     await expect(page.getByRole('log', { name: 'Job log' })).toContainText('Created 42 New Custom Formats (preview)');
-    await page.goto('/connect');
+    await page.goto('/library');
     await expect(page.getByRole('region', { name: 'Quality profiles' })).toContainText('Last run:');
     await expect(
       page.getByRole('region', { name: 'Quality profiles' }).getByRole('checkbox', { name: /UHD Bluray/ }),
@@ -571,7 +572,7 @@ test.describe('system and setup', () => {
     const line = downloads.getByRole('link', { name: /seeding/ });
     await expect(line).toHaveText('3 seeding (16.0 GiB) · no limit set');
     await line.click();
-    await expect(page).toHaveURL(/\/connect$/);
+    await expect(page).toHaveURL(/\/library$/);
     const seeding = page.getByRole('region', { name: 'Seeding' });
     await expect(seeding).toContainText('3 torrents (16.0 GiB), the longest for 40 days');
     await expect(seeding).toContainText('Stopped, still in qBittorrent1 torrent (6.0 GiB)');
@@ -599,6 +600,8 @@ test.describe('system and setup', () => {
 
   test('Connect apps lists every check per app without failing as a whole', async ({ page }) => {
     await page.goto('/connect');
+    // Quality profiles, disc images and seeding live on the Library page now.
+    await expect(page.getByRole('region', { name: 'Quality profiles' })).toHaveCount(0);
     await expect(page.getByRole('region', { name: 'qBittorrent' })).toContainText('Login');
     await expect(page.getByRole('region', { name: 'Sonarr' })).toBeVisible();
     await page.getByRole('button', { name: 'Check again' }).click();

@@ -92,7 +92,7 @@ have new images (Traefik and Authelia included, minus any you exclude) and
 sends you one summary. It leaves Saltbox itself alone, because `sb update` is
 meant to be run by a person.
 
-Connect apps sets up quality profiles through Recyclarr (TRaSH Guides
+The Library page sets up quality profiles through Recyclarr (TRaSH Guides
 profiles, written to `/opt/recyclarr` with API keys read from the apps). It
 counts how many shows and films use each profile and has a button to move
 them all onto a synced one, since a sync creates profiles but assigns nothing.
@@ -121,13 +121,13 @@ to, and after a boot shows the containers coming back.
 
 ## Status: what has and hasn't been checked
 
-Version 0.2.5. Treat it as a beta.
+Version 0.2.6. Treat it as a beta.
 
 | Check | Result |
 | --- | --- |
 | Python tests (pytest) | 413 tests; pass on Python 3.12 and 3.14 |
 | Web unit tests (Vitest) | 100 tests pass |
-| End-to-end tests (Playwright, Chromium) | 66 tests pass: every flow on desktop, every page at phone and tablet width, failing on any console error |
+| End-to-end tests (Playwright, Chromium) | 68 tests pass: every flow on desktop, every page at phone and tablet width, failing on any console error |
 | Package | CI builds the wheel, installs it in a clean environment and loads the web app from it |
 | Real servers | **One**: Ubuntu 26.04, Python 3.14, local drives pooled with mergerfs, Plex, qBittorrent behind Gluetun (ProtonVPN) |
 
@@ -204,7 +204,7 @@ Install the wheel from this repository's Releases page with pipx:
 
 ```
 sudo apt install -y pipx
-V=0.2.5
+V=0.2.6
 sudo PIPX_HOME=/usr/local/pipx PIPX_BIN_DIR=/usr/local/bin pipx install \
   "https://github.com/syms-dev/saltbox-ui/releases/download/v$V/saltbox_ui-$V-py3-none-any.whl"
 ```

@@ -9,6 +9,7 @@ import { ConfigPage } from './pages/config-page';
 import { ConnectPage } from './pages/connect-page';
 import { HomePage } from './pages/home-page';
 import { JobPage } from './pages/job-page';
+import { LibraryPage } from './pages/library-page';
 import { NotFoundPage } from './pages/not-found-page';
 import { SystemPage } from './pages/system-page';
 
@@ -20,6 +21,7 @@ export const ROUTES = {
   CONNECT: '/connect',
   DISCOVER: '/apps/discover',
   HOME: '/',
+  LIBRARY: '/library',
   SYSTEM: '/system',
   app: (repo: string, role: string) => `/apps/${repo}/${role}` as const,
   configFile: (name: string) => `/config/${name}` as const,
@@ -46,6 +48,7 @@ export function App(): React.ReactNode {
         <Route element={<OldJobLink />} path="jobs/:id" />
         <Route element={<SystemPage />} path="system" />
         <Route element={<Navigate replace to="/system" />} path="storage" />
+        <Route element={<LibraryPage />} path="library" />
         <Route element={<ConnectPage />} path="connect" />
         <Route element={<AutomationPage />} path="automation" />
         <Route element={<Navigate replace to="/config/accounts" />} path="config" />

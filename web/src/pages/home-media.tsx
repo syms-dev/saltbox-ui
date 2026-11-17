@@ -94,7 +94,7 @@ function SeedingLine(): React.ReactNode {
   if (status?.seeding === undefined) return null;
   const { count, size } = status.seeding;
   return (
-    <Link className={`small ${styles['seeding']}`} to="/connect">
+    <Link className={`small ${styles['seeding']}`} to="/library">
       {count} seeding{count === 0 ? '' : ` (${formatBytes(size)})`}
       {status.unlimited === true ? ' · no limit set' : ''}
     </Link>

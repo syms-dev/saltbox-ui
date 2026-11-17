@@ -383,6 +383,9 @@ export function AppsPage({ tab }: { tab: 'discover' | 'installed' }): React.Reac
       <div className={styles['header']}>
         <h1>Apps</h1>
         <span className="spacer" />
+        <Link className="button small" to="/library">
+          Library
+        </Link>
         <Link className="button small" to="/connect">
           Connect apps
         </Link>

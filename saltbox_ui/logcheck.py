@@ -110,11 +110,11 @@ RULES: tuple[Rule, ...] = (
         "Bazarr tried to read the video details of a file that is not a video it understands, "
         "such as a disc image (.iso). It skips that file; nothing else is affected.",
         (
-            "For films: Connect apps, Disc images in your films, lists every one Radarr has and "
+            "For films: Library, Disc images in your films, lists every one Radarr has and "
             "has Radarr find proper copies (it can keep each image until one arrives).",
             "For episodes: in Sonarr, delete the file and search again.",
             "To stop disc images being downloaded, put your films and shows on a TRaSH quality "
-            "profile (Connect apps, Quality profiles): those do not allow DVD quality, which is "
+            "profile (Library, Quality profiles): those do not allow DVD quality, which is "
             "what Radarr counts a disc image as, and they reject BR-DISK releases.",
         ),
         severity="notice",

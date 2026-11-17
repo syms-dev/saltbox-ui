@@ -9,6 +9,7 @@ const PAGES = [
   '/apps/saltbox/sonarr?tab=settings',
   '/activity',
   '/system',
+  '/library',
   '/connect',
   '/automation',
   '/config/accounts',

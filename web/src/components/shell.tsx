@@ -5,6 +5,7 @@ import {
   FileCog,
   House,
   LayoutGrid,
+  Library as LibraryIcon,
   LoaderCircle,
   Search,
   Server,
@@ -28,6 +29,7 @@ const ICON = 18;
 const NAV = [
   { icon: <House size={ICON} />, label: 'Home', short: 'Home', to: '/' },
   { icon: <LayoutGrid size={ICON} />, label: 'Apps', short: 'Apps', to: '/apps' },
+  { icon: <LibraryIcon size={ICON} />, label: 'Library', short: 'Library', to: '/library' },
   { icon: <Activity size={ICON} />, label: 'Activity', short: 'Activity', to: '/activity' },
   { icon: <Server size={ICON} />, label: 'System', short: 'System', to: '/system' },
   { icon: <BellRing size={ICON} />, label: 'Automation', short: 'Automation', to: '/automation' },
@@ -35,8 +37,8 @@ const NAV = [
   { icon: <FileCog size={ICON} />, label: 'Config', short: 'Config', to: '/config' },
 ] as const;
 
-/** The bottom bar has room for five; Connect and Automation are linked from Apps and System. */
-const TABS = NAV.filter((item) => item.to !== '/connect' && item.to !== '/automation');
+/** The bottom bar has room for five; Library, Connect and Automation are linked from Apps and System. */
+const TABS = NAV.filter((item) => item.to !== '/library' && item.to !== '/connect' && item.to !== '/automation');
 
 function navClass({ isActive }: { isActive: boolean }): string {
   return isActive ? `${styles['navLink']} ${styles['active']}` : (styles['navLink'] ?? '');

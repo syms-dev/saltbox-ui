@@ -8,6 +8,7 @@ import {
   HardDrive,
   House,
   LayoutGrid,
+  Library as LibraryIcon,
   PackagePlus,
   RefreshCw,
   Search,
@@ -101,6 +102,14 @@ function useCommands(query: string, close: () => void): Command[] {
       },
       {
         group: 'Go to',
+        icon: <LibraryIcon size={ICON} />,
+        id: 'library',
+        keywords: 'quality profiles recyclarr disc images iso seeding ratio torrents',
+        label: 'Library: quality, disc images and seeding',
+        run: go('/library'),
+      },
+      {
+        group: 'Go to',
         icon: <Cable size={ICON} />,
         id: 'connect',
         keywords: 'setup wire download clients indexers',
@@ -121,7 +130,7 @@ function useCommands(query: string, close: () => void): Command[] {
         id: 'profiles',
         keywords: 'recyclarr trash guides quality profiles custom formats 4k 1080p',
         label: 'Quality profiles (Recyclarr)',
-        run: go('/connect'),
+        run: go('/library'),
       },
       {
         group: 'Go to',
