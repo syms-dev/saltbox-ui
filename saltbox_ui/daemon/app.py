@@ -28,6 +28,7 @@ from ..catalog import Catalog
 from ..config import ConfigService, Inventory
 from ..layout import Layout
 from ..runner import SbRunner
+from ..state.containers import invalidate_containers
 from ..yamlio import DuplicateKeys
 from .automation import AutomationService
 from .dismissals import Dismissals
@@ -102,10 +103,9 @@ class Services:
         self.runner = SbRunner(self.layout)
         self.jobs = JobManager(self.runner)
         self.updates = UpdateService(self.layout)
-        # An install job pulls new images; check again once it has finished.
-        self.jobs.on_finish.append(
-            lambda job: self.updates.refresh() if job.kind in {"install", "update"} else None
-        )
+        # An install job pulls new images: mark what is now current at once (from Docker),
+        # then check the registries again.
+        self.jobs.on_finish.append(self._after_install)
         self.automation = AutomationService(self)
         self.jobs.on_finish.append(lambda job: self.automation.on_job_finished(job))
         self.dismissals = Dismissals(self.layout.state_dir / "dismissed.json")
@@ -119,6 +119,12 @@ class Services:
                 self.__dict__.pop("_recyclarr_usage", None) if job.kind == "recyclarr" else None
             )
         )
+
+    def _after_install(self, job: Any) -> None:
+        invalidate_containers()  # any job can have recreated, removed or restarted containers
+        if job.kind in {"install", "update"}:
+            self.updates.reconcile()
+            self.updates.refresh()
 
     def _after_self_update(self, job: Any) -> None:
         """Once the app has updated itself, restart to run the new code."""

@@ -146,6 +146,7 @@ function InstalledRow({ app }: { app: App }): React.ReactNode {
 }
 
 function Installed({ apps }: { apps: App[] }): React.ReactNode {
+  const busy = useJobs().data?.busy ?? false; // no second update while one runs
   const [params, setParams] = useSearchParams();
   const [needle, setNeedle] = useState('');
   const show = (params.get('show') ?? 'all') as Show;
@@ -202,7 +203,7 @@ function Installed({ apps }: { apps: App[] }): React.ReactNode {
           Check now
         </button>
         {pending.length > 0 ? (
-          <button className="small primary" onClick={() => void jobs.updateAll(pending)} type="button">
+          <button className="small primary" disabled={busy} onClick={() => void jobs.updateAll(pending)} type="button">
             Update all ({pending.length})
           </button>
         ) : null}

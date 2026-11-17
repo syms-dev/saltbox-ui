@@ -531,3 +531,69 @@ def test_a_non_dict_token_answer_is_handled_not_crashed() -> None:
     )
     with pytest.raises(SetupError):  # treated as "no token", never an AttributeError
         reg._token('Bearer realm="https://auth.example.com/token"', ImageRef("reg", "repo", "tag"))
+
+
+def test_a_finished_update_clears_its_badge_without_asking_the_registries(
+    scratch_layout: Layout,
+) -> None:
+    """After a job pulled an app's new image, the full check took a while and the app kept
+    its "update available" badge and Update button. ``reconcile`` sees from Docker alone
+    that the image now running is the one the registry offered."""
+    image = "ghcr.io/hotio/sonarr:release"
+    containers = [{"name": "sonarr", "image_ref": image, "image_id": "sha256:new"}]
+    service = UpdateService(
+        scratch_layout,
+        containers=lambda: containers,
+        checker=lambda c: {
+            image: ImageStatus(image, "update", remote_digest="sha256:pub", containers=["sonarr"])
+        },
+        repos=lambda: [],
+        clock=lambda: 1000.0,
+        digests=lambda ids: {"sha256:new": ["sha256:pub"]},
+    )
+    service.refresh(wait=True)
+    assert service.status_by_container()["sonarr"]["status"] == "update"
+    service.reconcile()
+    after = service.cached()
+    assert after["images"][image]["status"] == "current"
+    assert after["checked_at"] == 1000.0  # not a full check: the time of the last one stays
+
+
+def test_reconcile_never_marks_current_what_the_registry_did_not_offer(
+    scratch_layout: Layout,
+) -> None:
+    image = "img:tag"
+    service = UpdateService(
+        scratch_layout,
+        containers=lambda: [{"name": "a", "image_ref": image, "image_id": "sha256:old"}],
+        checker=lambda c: {
+            image: ImageStatus(image, "update", remote_digest="sha256:pub", containers=["a"])
+        },
+        repos=lambda: [],
+        digests=lambda ids: {"sha256:old": ["sha256:previous"]},
+    )
+    service.refresh(wait=True)
+    service.reconcile()
+    assert service.cached()["images"][image]["status"] == "update"
+
+
+def test_a_check_asked_for_during_a_check_runs_after_it(scratch_layout: Layout) -> None:
+    """The check after a job could be refused because a periodic one was running, and that
+    one had read the containers before the job changed them, so the badge came back."""
+    import threading
+
+    release, calls = threading.Event(), []
+
+    def checker(containers):
+        calls.append(1)
+        release.wait(5)
+        return {}
+
+    service = UpdateService(
+        scratch_layout, containers=lambda: [], checker=checker, repos=lambda: []
+    )
+    assert service.refresh() is True
+    assert service.refresh() is False  # already running: queued instead of dropped
+    release.set()
+    service.wait(5)
+    assert len(calls) == 2

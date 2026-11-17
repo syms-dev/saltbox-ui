@@ -72,3 +72,24 @@ def test_a_structured_save_over_a_duplicate_key_is_refused(tmp_path: Path) -> No
     with pytest.raises(DuplicateKeys):
         inventory.unset("a")
     assert path.read_text().count("sonarr_tag:") == 2  # nothing was dropped
+
+
+def test_the_inventory_is_parsed_once_until_it_changes(tmp_path: Path, monkeypatch) -> None:
+    """The Apps page asked for each of 200+ catalog apps' instances, and every ask parsed the
+    whole inventory again: seconds per page on a lived-in localhost.yml."""
+    from saltbox_ui.config import inventory as module
+
+    path = tmp_path / "localhost.yml"
+    path.write_text("sonarr_instances: [sonarr, sonarr4k]\n")
+    parses: list[int] = []
+    real = module.load_yaml
+    monkeypatch.setattr(module, "load_yaml", lambda p: parses.append(1) or real(p))
+    inventory = Inventory(path)
+    for _ in range(200):
+        assert inventory.instances("sonarr") == ["sonarr", "sonarr4k"]
+    assert len(parses) == 1
+    inventory.instances("sonarr").append("changed by a caller")  # callers get copies
+    assert inventory.instances("sonarr") == ["sonarr", "sonarr4k"]
+    inventory.set("sonarr_instances", ["sonarr"])  # a save replaces the file
+    assert inventory.instances("sonarr") == ["sonarr"]
+    assert Inventory(path).get("sonarr_instances") == ["sonarr"]  # shared across objects

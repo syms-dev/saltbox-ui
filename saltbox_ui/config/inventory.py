@@ -7,12 +7,21 @@ every instance, ``<instance><suffix>`` applies to one. Instance-scoped wins.
 
 from __future__ import annotations
 
+import copy
+import threading
 from pathlib import Path
 from typing import Any
 
 from ruamel.yaml.comments import CommentedMap
 
 from ..yamlio import coerce_scalar, load_yaml, refuse_duplicate_keys, save_yaml, to_plain
+
+# Parsed inventories, by file, kept until the file changes. Reads happen per app (the
+# Apps page asked once for each of 200+ catalog entries), and each round-trip parse of a
+# lived-in localhost.yml took tens of milliseconds, so a page waited seconds for the same
+# file to be read 200 times. Writers still parse afresh (``load``).
+_PARSED: dict[str, tuple[tuple[int, int, int], dict[str, Any]]] = {}
+_PARSED_LOCK = threading.Lock()
 
 INVENTORY_HEADER = (
     "---\n"
@@ -41,12 +50,32 @@ class Inventory:
         data = load_yaml(self.path)
         return data if isinstance(data, CommentedMap) else CommentedMap()
 
+    def _plain(self) -> dict[str, Any]:
+        """The inventory as plain data, parsed once per change of the file. Callers get
+        copies (``as_dict``, ``get``), so nothing can change what is kept here."""
+        try:
+            info = self.path.stat()
+        except FileNotFoundError:
+            return {}
+        # A save replaces the file, so the inode changes even when size and time do not.
+        version = (info.st_mtime_ns, info.st_size, info.st_ino)
+        where = str(self.path)
+        with _PARSED_LOCK:
+            kept = _PARSED.get(where)
+            if kept is not None and kept[0] == version:
+                return kept[1]
+        data = to_plain(self.load())
+        data = data if isinstance(data, dict) else {}
+        with _PARSED_LOCK:
+            _PARSED[where] = (version, data)
+        return data
+
     def as_dict(self) -> dict[str, Any]:
-        return to_plain(self.load())
+        return copy.deepcopy(self._plain())
 
     def get(self, key: str, default: Any = None) -> Any:
-        data = self.load()
-        return to_plain(data[key]) if key in data else default
+        data = self._plain()
+        return copy.deepcopy(data[key]) if key in data else default
 
     def set(self, key: str, value: Any) -> None:
         refuse_duplicate_keys(self.path)

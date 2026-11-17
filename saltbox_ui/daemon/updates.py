@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 import time
@@ -12,7 +13,7 @@ from .. import safefs
 from ..layout import Layout
 from ..state.containers import list_containers
 from ..state.repos import RepoStatus, check_repos
-from ..state.updates import ImageStatus, check_updates
+from ..state.updates import ImageStatus, check_updates, local_digests
 
 CACHE_FILE = "updates.json"
 CACHE_VERSION = 2  # 2: added the Saltbox checkouts
@@ -29,6 +30,7 @@ class UpdateService:
         repos: Callable[[], list[RepoStatus]] | None = None,
         clock: Callable[[], float] = time.time,
         max_age: float = MAX_AGE,
+        digests: Callable[..., dict[str, list[str]]] | None = None,
     ):
         self.path = layout.state_dir / CACHE_FILE
         self.containers = containers or list_containers
@@ -38,8 +40,10 @@ class UpdateService:
         )
         self.clock = clock
         self.max_age = max_age
+        self.digests = digests or local_digests
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
+        self._again = False  # a check was asked for while one ran: run once more after it
         self.error = ""
 
     # -- cache -----------------------------------------------------------------
@@ -53,10 +57,15 @@ class UpdateService:
         data["error"] = self.error
         return data
 
-    def _write(self, images: dict[str, Any], repos: list[dict[str, Any]]) -> None:
+    def _write(
+        self,
+        images: dict[str, Any],
+        repos: list[dict[str, Any]],
+        checked_at: float | None = None,
+    ) -> None:
         payload = {
             "version": CACHE_VERSION,
-            "checked_at": self.clock(),
+            "checked_at": self.clock() if checked_at is None else checked_at,
             "images": images,
             "repos": repos,
         }
@@ -72,6 +81,8 @@ class UpdateService:
         """Start a check unless one is running; returns whether one was started."""
         with self._lock:
             if self.running:
+                # It may have read the containers before a job changed them: check again after.
+                self._again = True
                 return False
             self._thread = threading.Thread(target=self._run, name="update-check", daemon=True)
             self._thread.start()
@@ -85,6 +96,50 @@ class UpdateService:
             thread.join(timeout)
 
     def _run(self) -> None:
+        self._check()
+        while True:
+            with self._lock:
+                if not self._again:
+                    return
+                self._again = False
+            self._check()
+
+    def reconcile(self) -> None:
+        """Mark images current that now match what the registry offered, from Docker alone.
+
+        After a job pulls an app's new image, the full check (a request per image to each
+        registry) takes a while, and until it ends the app still showed "update available"
+        with its Update button. The local image's digests are enough to see that it now is
+        the published one; nothing is marked current that the registry did not offer.
+        """
+        cached = self.cached()
+        images = cached.get("images", {})
+        waiting = {
+            ref: status
+            for ref, status in images.items()
+            if status.get("status") == "update" and status.get("remote_digest")
+        }
+        if not waiting:
+            return
+        try:
+            ids: dict[str, str] = {}
+            for container in self.containers():
+                ref = container.get("image_ref") or container.get("image") or ""
+                if ref in waiting and container.get("image_id"):
+                    ids.setdefault(ref, str(container["image_id"]))
+            local = self.digests(ids.values())
+        except Exception:  # the full check that follows will say what is wrong
+            return
+        changed = False
+        for ref, status in waiting.items():
+            if status["remote_digest"] in local.get(ids.get(ref, ""), []):
+                status.update(status="current", detail="")
+                changed = True
+        if changed:
+            with contextlib.suppress(OSError):
+                self._write(images, cached.get("repos", []), checked_at=cached.get("checked_at"))
+
+    def _check(self) -> None:
         """Check images and checkouts; a part that fails keeps its last good result."""
         previous = self.cached()
         errors: list[str] = []

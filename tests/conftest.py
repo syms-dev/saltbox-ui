@@ -11,6 +11,17 @@ from saltbox_ui.layout import Layout
 
 from .saltbox_checkout import saltbox_checkout
 
+
+@pytest.fixture(autouse=True)
+def _fresh_container_list():
+    """The container list is cached for a few seconds; no test sees another's."""
+    from saltbox_ui.state.containers import invalidate_containers
+
+    invalidate_containers()
+    yield
+    invalidate_containers()
+
+
 REPO_ROOT = saltbox_checkout()
 
 

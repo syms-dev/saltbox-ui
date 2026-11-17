@@ -10,11 +10,12 @@ import {
   Server,
   TriangleAlert,
 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
 
 import { ApiError, apiFetch, API_ROUTES } from '../api/client';
-import { useJobs, useMeta, useOverview } from '../api/queries';
+import { QUERY_KEYS, useJobs, useMeta, useOverview } from '../api/queries';
 import type { Job, Meta } from '../api/types';
 import { formatDuration } from '../format';
 import { CommandPalette } from './command-palette';
@@ -106,11 +107,17 @@ function RunningJob({ job }: { job: Job }): React.ReactNode {
 /** Tell the person when a job they may have walked away from finishes. */
 function useJobFinishedToast(current: Job | null): void {
   const toast = useToast();
+  const client = useQueryClient();
   const previous = useRef<Job | null>(null);
   useEffect(() => {
     const before = previous.current;
     previous.current = current;
     if (before === null || current?.id === before.id) return;
+    // A job can install, update or remove apps: read what it changed now, so a finished
+    // update stops offering its Update button instead of waiting for the next poll.
+    for (const key of [QUERY_KEYS.APPS, QUERY_KEYS.UPDATES, QUERY_KEYS.OVERVIEW, 'media']) {
+      void client.invalidateQueries({ queryKey: [key] });
+    }
     void apiFetch<Job>(API_ROUTES.job(before.id))
       .then((job) => {
         const ok = job.status === 'succeeded';
@@ -122,7 +129,7 @@ function useJobFinishedToast(current: Job | null): void {
         });
       })
       .catch(() => undefined);
-  }, [current, toast]);
+  }, [client, current, toast]);
 }
 
 export function Shell(): React.ReactNode {

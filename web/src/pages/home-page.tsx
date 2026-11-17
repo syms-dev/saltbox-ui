@@ -54,6 +54,7 @@ function ActionButton({ action }: { action: AttentionAction }): React.ReactNode 
   const start = useStartJob();
   const recent = useJobs();
   const toast = useToast();
+  const busy = recent.data?.busy ?? false; // a second click while it runs would only be refused
   switch (action.kind) {
     case 'link':
     case 'logs':
@@ -76,19 +77,24 @@ function ActionButton({ action }: { action: AttentionAction }): React.ReactNode 
       );
     case 'update':
       return (
-        <button className="small primary" onClick={() => void jobs.updateApp(action.app)} type="button">
+        <button className="small primary" disabled={busy} onClick={() => void jobs.updateApp(action.app)} type="button">
           {action.label}
         </button>
       );
     case 'updateAll':
       return (
-        <button className="small primary" onClick={() => void jobs.updateAll(action.apps)} type="button">
+        <button
+          className="small primary"
+          disabled={busy}
+          onClick={() => void jobs.updateAll(action.apps)}
+          type="button"
+        >
           {action.label}
         </button>
       );
     case 'selfUpdate':
       return (
-        <button className="small primary" onClick={() => void jobs.updateSelf()} type="button">
+        <button className="small primary" disabled={busy} onClick={() => void jobs.updateSelf()} type="button">
           {action.label}
         </button>
       );
@@ -233,6 +239,7 @@ function Launcher({ apps }: { apps: App[] }): React.ReactNode {
 function UpdatesCard({ apps }: { apps: App[] }): React.ReactNode {
   const updates = useUpdates();
   const actions = useJobActions();
+  const busy = useJobs().data?.busy ?? false;
   const pending = apps.filter((app) => app.update_available);
   const repos = updates.data?.repos ?? [];
   const behind = repos.filter((repo) => repo.status === 'update');
@@ -275,12 +282,17 @@ function UpdatesCard({ apps }: { apps: App[] }): React.ReactNode {
       </ul>
       <div className="row">
         {pending.length > 0 ? (
-          <button className="small primary" onClick={() => void actions.updateAll(pending)} type="button">
+          <button
+            className="small primary"
+            disabled={busy}
+            onClick={() => void actions.updateAll(pending)}
+            type="button"
+          >
             Update apps
           </button>
         ) : null}
         {behind.length > 0 ? (
-          <button className="small" onClick={() => void actions.updateSaltbox()} type="button">
+          <button className="small" disabled={busy} onClick={() => void actions.updateSaltbox()} type="button">
             Run sb update
           </button>
         ) : null}

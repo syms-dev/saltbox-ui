@@ -7,10 +7,13 @@ missing or fails. Both return the same records.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 import shutil
 import subprocess
+import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -118,7 +121,39 @@ def list_containers_cli(runner: Runner | None = None) -> list[dict[str, Any]]:
     return sorted(name_network_modes(records), key=lambda c: c["name"])
 
 
+# The container list, shared for a few seconds. Home asks for it from several requests at
+# once, and each listing is a docker call; one answer serves them all. Anything that
+# changes containers (a job finishing, start/stop) drops it with ``invalidate_containers``.
+CACHE_SECONDS = 3.0
+_cache_lock = threading.Lock()
+_cached: tuple[float, list[dict[str, Any]]] | None = None
+
+
+def invalidate_containers() -> None:
+    global _cached
+    with _cache_lock:
+        _cached = None
+
+
 def list_containers(*, all_containers: bool = True) -> list[dict[str, Any]]:
+    """Every container with its labels, state and health; callers get their own copy."""
+    global _cached
+    if not all_containers:
+        return _list_containers(all_containers=False)
+    with _cache_lock:  # concurrent callers wait for one docker call rather than each making one
+        if _cached is not None and time.monotonic() - _cached[0] < CACHE_SECONDS:
+            return copy.deepcopy(_cached[1])
+        result = _list_containers(all_containers=True)
+        _cached = (time.monotonic(), result)
+        return copy.deepcopy(result)
+
+
+def _list_containers(*, all_containers: bool) -> list[dict[str, Any]]:
+    # The CLI first: ``docker ps`` and one ``docker inspect`` of every container (two calls).
+    # The SDK fetches each container, and then its image, one request at a time: about 70
+    # requests and 1.5 s for 22 containers. It is only the fallback without the CLI.
+    if shutil.which("docker") is not None:
+        return list_containers_cli()
     try:
         import docker  # type: ignore[import-not-found]
     except ImportError:
