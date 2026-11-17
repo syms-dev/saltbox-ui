@@ -910,6 +910,9 @@ def _truthy(value: object) -> bool:
     return isinstance(value, str | int) and str(value).strip().lower() in {"true", "yes", "1"}
 
 
+MERGE_KEY = re.compile(r"<<\s*:")  # a YAML merge key, in block or flow form
+
+
 def read_bazarr_settings(directory: Path, base: Path | None = None) -> dict[str, Any] | None:
     """Bazarr's settings: config/config.yaml (Bazarr 1.4+) or config/config.ini (older)."""
     for candidate in ("config/config.yaml", "config.yaml", "data/config/config.yaml"):
@@ -918,6 +921,10 @@ def read_bazarr_settings(directory: Path, base: Path | None = None) -> dict[str,
         if text is not None:
             from ..yamlio import load_plain_text
 
+            # Bazarr never writes YAML merge keys; one app rewriting its own config as
+            # thousands of ``<<: *anchor`` copies would expand to gigabytes on load.
+            if MERGE_KEY.search(text):
+                return None
             try:
                 data = load_plain_text(text)
             except Exception:  # half-written by Bazarr: treat as not readable yet

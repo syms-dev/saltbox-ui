@@ -9,7 +9,6 @@ same login), and the Plex token from ``/opt/saltbox/plex.ini``.
 
 from __future__ import annotations
 
-import configparser
 import ipaddress
 import re
 import shutil
@@ -164,19 +163,17 @@ def xml_api_key(path: Path, base: Path | None = None) -> str:
     return _api_key(match.group(1)) if match else ""
 
 
+# ``api_key = <value>`` on its own line. Anchored and linear, so a container that fills
+# sabnzbd.ini with one long line (``configparser`` is quadratic on that) cannot stall the
+# daemon; the value is validated by ``_api_key`` as before.
+SAB_API_KEY = re.compile(r"(?mi)^[ \t]*api_key[ \t]*=[ \t]*([^\n]*)")
+
+
 def sabnzbd_api_key(path: Path, base: Path | None = None) -> str:
-    parser = configparser.ConfigParser(interpolation=None, strict=False)
     text = safefs.read_text_or_none(path, base=base)
-    if text is None:
-        return ""
-    try:
-        parser.read_string("[__top__]\n" + text)
-    except configparser.Error:
-        return ""
-    for section in ("misc", "__top__"):
-        if parser.has_option(section, "api_key"):
-            return _api_key(parser.get(section, "api_key").strip())
-    return ""
+    match = SAB_API_KEY.search(text) if text else None
+    # ``_api_key`` rejects a value that is not one clean token (a space, a comment, markup).
+    return _api_key(match.group(1).strip()) if match else ""
 
 
 def config_path(layout: Layout, role: str, name: str) -> Path:

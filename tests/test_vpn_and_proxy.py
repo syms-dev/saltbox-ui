@@ -127,3 +127,23 @@ def test_running_containers_count_as_installed(monkeypatch) -> None:
     )
     appsetup._mark_running(found)
     assert found.first("flaresolverr") is not None
+
+
+def test_docker_cat_caps_a_flooding_container(tmp_path, monkeypatch) -> None:
+    import os
+    import time
+
+    from saltbox_ui.appsetup import vpnport
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    docker = bindir / "docker"
+    docker.write_text("#!/bin/sh\nexec cat /dev/zero\n")
+    docker.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+    start = time.monotonic()
+    out = vpnport.docker_cat("gluetun", "/x")
+    assert len(out) <= vpnport.MAX_READ
+    assert time.monotonic() - start < 10
+    docker.write_text("#!/bin/sh\nprintf 12345\n")
+    assert vpnport.docker_cat("gluetun", "/x") == "12345"

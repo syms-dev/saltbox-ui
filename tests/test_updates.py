@@ -511,3 +511,12 @@ def test_nightly_maintenance_uses_the_same_list_and_honours_exclusions(infrastru
     record = services.automation.run_maintenance(wait_seconds=30)
     assert [step["what"] for step in record["steps"]] == ["update Authelia"]
     assert record["status"] == "succeeded"
+
+
+def test_a_long_authentication_challenge_is_refused() -> None:
+    from saltbox_ui.appsetup.http import SetupError
+    from saltbox_ui.state.updates import ImageRef, Registry
+
+    reg = Registry.__new__(Registry)
+    with pytest.raises(SetupError):
+        Registry._token(reg, "Bearer " + "a" * 60_000, ImageRef("reg", "repo", "tag"))

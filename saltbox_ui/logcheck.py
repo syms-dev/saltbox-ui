@@ -30,6 +30,9 @@ MIN_REPEATS = 3  # an unexplained error must recur this often to be listed
 MAX_GROUPS = 5  # per container
 MAX_MESSAGE = 400
 MAX_SUBJECTS = 10
+# A single log line a container writes can be megabytes with no newline (Docker returns
+# it whole). Cut each line before it is scanned, so the work per line is bounded.
+MAX_LINE = 16 * 1024
 
 ERROR = re.compile(
     r"\b(?:ERROR|ERR|FATAL|CRITICAL|CRIT|PANIC)\b"  # the usual level words
@@ -271,7 +274,7 @@ def analyse(
     unionfs, local = roots or (UNIONFS, LOCAL)
     groups: dict[str, dict[str, Any]] = {}
     for raw in lines:
-        seen, text = split_time(raw)
+        seen, text = split_time(raw[:MAX_LINE])
         error = is_error(text)
         message = clean(text)
         # A message known for one app counts whatever level the app logs it at; the
@@ -330,7 +333,9 @@ def _rule_view(rule: Rule | None, cloud: bool) -> dict[str, Any] | None:
 UNIONFS = Path("/mnt/unionfs")
 LOCAL = Path("/mnt/local")
 ANCHOR_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
-ANCHORS = re.compile(r"missing_anchors=(\[[^\]]*\])")
+# Linear: stop the list at the next ``[`` so a line of ``missing_anchors=[`` repeated,
+# which a container can print, is matched in one pass rather than quadratically.
+ANCHORS = re.compile(r"missing_anchors=(\[[^\]\[]*\])")
 
 
 def missing_anchors(message: str) -> list[str]:

@@ -61,6 +61,7 @@ JOB_ID = re.compile(r"[0-9a-f]{1,32}")
 # A tag is a word. Anything else, a leading dash above all, would reach sb as an option.
 TAG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 MAX_LOG_BYTES = 64 * 1024 * 1024  # a job that prints more than this is cut short in the log
+MAX_LINE_CHARS = 1024 * 1024  # one line longer than this is cut, so no single line grows memory
 KEEP_JOBS = 200
 MAX_RUNS = 3
 
@@ -396,18 +397,38 @@ class SbRunner:
             stdin=subprocess.DEVNULL,
             cwd=cwd,
             env=env,
-            text=True,
-            errors="replace",
-            bufsize=1,
             # Its own process group, so cancelling stops ansible-playbook and
             # everything else sb started, not only sb.
             start_new_session=True,
         )
         assert process.stdout is not None
         self._process = process
+        fd = process.stdout.fileno()
         try:
-            for line in process.stdout:
-                emit(line.rstrip("\n"))
+            # Read what has arrived (so lines stream as they are written) and split lines
+            # here: a container whose output this job pipes (``docker exec recyclarr``) could
+            # otherwise print one line without a newline forever and grow this process.
+            buffer = b""
+            skipping = False
+            while True:
+                try:
+                    chunk = os.read(fd, 65536)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                buffer += chunk
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    if not skipping:
+                        emit(line[:MAX_LINE_CHARS].decode("utf-8", "replace"))
+                    skipping = False
+                if len(buffer) > MAX_LINE_CHARS:  # an overlong line: emit the start, drop the rest
+                    if not skipping:
+                        emit(buffer[:MAX_LINE_CHARS].decode("utf-8", "replace"))
+                    buffer, skipping = b"", True
+            if buffer and not skipping:
+                emit(buffer[:MAX_LINE_CHARS].decode("utf-8", "replace"))
             return process.wait()
         except KeyboardInterrupt:
             self._stop(process)

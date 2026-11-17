@@ -15,11 +15,15 @@ timer re-runs ``sbx setup sync-port`` every few minutes.
 from __future__ import annotations
 
 import re
+import contextlib
 import shutil
 import subprocess
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
+
+MAX_READ = 64 * 1024  # the files read this way hold a port or a short JSON; cap a hostile cat
 
 STATUS_FILE = "/tmp/gluetun/forwarded_port"  # Gluetun's default VPN_PORT_FORWARDING_STATUS_FILE
 PORT_LOG_RE = re.compile(r"port forwarded is (\d+)", re.I)
@@ -31,20 +35,38 @@ Systemctl = Callable[..., tuple[int, str]]
 
 
 def docker_cat(container: str, path: str) -> str:
-    """A file's contents from inside a running container, or ''."""
+    """A file's contents from inside a running container (at most ``MAX_READ``), or ''.
+
+    The container's own ``cat`` decides what it prints, so the read is capped and killed:
+    a compromised container cannot grow the root daemon's memory without bound here.
+    """
     if shutil.which("docker") is None:
         return ""
     try:
-        result = subprocess.run(
-            ["docker", "exec", "--", container, "cat", path],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=15,
+        proc = subprocess.Popen(
+            ["docker", "exec", "--", container, "cat", "--", path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError:
         return ""
-    return result.stdout if result.returncode == 0 else ""
+    read: list[bytes] = []
+
+    def pull() -> None:
+        with contextlib.suppress(Exception):
+            read.append(proc.stdout.read(MAX_READ + 1) or b"")  # type: ignore[union-attr]
+
+    worker = threading.Thread(target=pull, daemon=True)
+    worker.start()
+    worker.join(15)
+    proc.kill()
+    with contextlib.suppress(Exception):
+        proc.wait(timeout=2)
+    with contextlib.suppress(Exception):
+        proc.stdout.close()  # type: ignore[union-attr]
+    if worker.is_alive() or not read:  # stalled, or nothing arrived
+        return ""
+    return read[0][:MAX_READ].decode("utf-8", "replace")
 
 
 def forwarded_port(

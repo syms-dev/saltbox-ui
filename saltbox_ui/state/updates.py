@@ -85,6 +85,8 @@ class Registry:
         return self.transport("HEAD", ref.manifest_url, headers, None)
 
     def _token(self, challenge: str, ref: ImageRef) -> str:
+        if len(challenge) > 8192:  # a real WWW-Authenticate is short; a long one is quadratic here
+            raise SetupError(f"{ref.registry}: its authentication challenge is too long")
         params = dict(CHALLENGE_RE.findall(challenge))
         realm = params.pop("realm", "")
         if not realm:

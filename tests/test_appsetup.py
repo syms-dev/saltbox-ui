@@ -691,3 +691,37 @@ def test_seerr_is_checked_from_its_settings(tmp_path) -> None:
         )
     )
     assert task.refresh().status == "done"
+
+
+def test_a_long_sabnzbd_ini_does_not_stall(tmp_path: Path) -> None:
+    import time
+
+    app = tmp_path / "sab"
+    app.mkdir()
+    (app / "sabnzbd.ini").write_text("a" + " " * 200_000 + "b\n")
+    start = time.monotonic()
+    assert sabnzbd_api_key(app / "sabnzbd.ini", tmp_path) == ""
+    assert time.monotonic() - start < 1.0
+    (app / "sabnzbd.ini").write_text("[misc]\napi_key = abcDEF123456\nnzb_key = zzz\n")
+    assert sabnzbd_api_key(app / "sabnzbd.ini", tmp_path) == "abcDEF123456"
+
+
+def test_a_bazarr_config_with_merge_keys_is_refused(tmp_path: Path) -> None:
+    import time
+
+    from saltbox_ui.appsetup.tasks import read_bazarr_settings
+
+    cfg = tmp_path / "bazarr" / "config"
+    cfg.mkdir(parents=True)
+    bomb = (
+        "g: &b {" + ", ".join(f"k{i}: 1" for i in range(20_000)) + "}\n"
+        + "".join(f"m{i}: {{<<: *b}}\n" for i in range(2_000))
+    )
+    (cfg / "config.yaml").write_text(bomb)
+    start = time.monotonic()
+    assert read_bazarr_settings(tmp_path / "bazarr", tmp_path) is None
+    assert time.monotonic() - start < 2.0
+    (cfg / "config.yaml").write_text("general:\n  auth:\n    apikey: x\n")
+    assert read_bazarr_settings(tmp_path / "bazarr", tmp_path) == {
+        "general": {"auth": {"apikey": "x"}}
+    }

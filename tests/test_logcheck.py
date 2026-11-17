@@ -384,3 +384,17 @@ def test_docker_timestamps_are_read_as_moments() -> None:
     assert logcheck.seen_at("2026-11-13T14:46:35.123456789Z") == pytest.approx(1794581195.123456)
     assert logcheck.seen_at("2026-11-13T14:46:35Z") == 1794581195.0
     assert logcheck.seen_at("") is None and logcheck.seen_at("yesterday") is None
+
+
+def test_a_long_log_line_does_not_stall_the_scan() -> None:
+    """A container can print one line of megabytes with no newline; the anchor scan of it
+    must stay fast (it was quadratic), and a well-formed anchor list must still parse."""
+    import time
+
+    line = T + "ERR Anchor files unavailable " + "missing_anchors=[" * 20000
+    start = time.monotonic()
+    logcheck.analyse("autoscan", [line], cloud=False)
+    assert time.monotonic() - start < 1.0
+    good = T + 'ERR Anchor files unavailable missing_anchors=["mounted.bin"]'
+    _, text = logcheck.split_time(good)
+    assert logcheck.missing_anchors(logcheck.clean(text)) == ["mounted.bin"]

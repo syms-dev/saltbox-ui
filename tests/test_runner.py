@@ -175,3 +175,21 @@ def test_job_records_and_logs_are_private(scratch_layout: Layout, fake_sb: Path)
     job = SbRunner(scratch_layout, sb=fake_sb).install(["core"])
     assert scratch_layout.jobs_dir.stat().st_mode & 0o777 == 0o700
     assert Path(job.log_path).stat().st_mode & 0o777 == 0o600
+
+
+def test_a_pipes_output_is_read_in_bounded_lines(scratch_layout: Layout) -> None:
+    """A job that pipes a container's output (docker exec) could meet one line without a
+    newline forever; the read is chunked and each line is cut, so memory stays bounded."""
+    import sys
+
+    from saltbox_ui import runner as runner_mod
+
+    runner = SbRunner(scratch_layout, sb=Path("/bin/true"))
+    lines: list[str] = []
+    code = "import sys; sys.stdout.write('x' * (5 * 1024 * 1024)); sys.stdout.write('\\nshort\\n')"
+    rc = runner._run_piped(
+        [sys.executable, "-I", "-c", code], dict(os.environ), str(scratch_layout.repo), lines.append
+    )
+    assert rc == 0
+    assert lines and max(len(line) for line in lines) <= runner_mod.MAX_LINE_CHARS
+    assert "short" in lines
