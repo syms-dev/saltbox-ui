@@ -58,6 +58,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="accept the proxy token from any address, not only Traefik's (not recommended)",
     )
     parser.add_argument(
+        "--no-verify-session",
+        action="store_true",
+        default=os.environ.get("SALTBOX_UI_VERIFY_SESSION", "").lower() in {"off", "0", "false"},
+        help="trust the sign-on's Remote-* headers instead of confirming the session with it "
+        "(only if the daemon cannot reach the sign-on; not recommended)",
+    )
+    parser.add_argument(
+        "--sso-container",
+        default=os.environ.get("SALTBOX_UI_SSO_CONTAINER") or None,
+        help="the sign-on provider's container name, when it is not the default "
+        "(authelia/authentik)",
+    )
+    parser.add_argument(
         "--web", default=os.environ.get("SALTBOX_UI_WEB"), help="directory with the built web app"
     )
     parser.add_argument("--log-level", default="info")
@@ -183,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
         root_socket=uds,
         admin_check=not args.no_admin_check,
         sso=args.sso,
+        verify_session=not args.no_verify_session,
+        sso_container=args.sso_container,
     )
     app.state.services.automation.start()
     # Parse every role's defaults once in the background, so the first Apps page is quick.

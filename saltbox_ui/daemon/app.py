@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import hmac
 import ipaddress
 import logging
@@ -64,9 +65,14 @@ class Services:
     # The root-only Unix socket: the one listener where no token is asked for.
     root_socket: str | None = None
     admin_check: bool = True
-    # Which single sign-on the Traefik route sends people through: its headers, and only
-    # its headers, say who signed in.
+    # Which single sign-on the Traefik route sends people through. On a proxied request
+    # the daemon asks it, with the request's cookie, who signed in, rather than trusting
+    # the headers (a container's Traefik labels can set those). ``verify_session`` off
+    # falls back to trusting the headers; ``sso_container`` names the provider's container
+    # when it is not the default (``authelia``/``authentik``).
     sso: str = "authelia"
+    verify_session: bool = True
+    sso_container: str | None = None
     app_setup_factory: Callable[[Layout], Any] | None = None
     # Restarting the server, and the file Ubuntu leaves when it needs one (tests replace both).
     reboot: Callable[[], None] | None = None
@@ -237,6 +243,111 @@ def container_addresses(name: str) -> set[str]:
     return found
 
 
+# The single sign-on's own verify endpoint: (default container name, port, path). The
+# daemon asks it, with the request's cookie, who is signed in, rather than trusting the
+# Remote-* headers, which a Traefik router defined by a container's labels can set.
+SSO_VERIFY = {
+    "authelia": ("authelia", 9091, "/api/verify"),
+    "authentik": ("authentik", 9000, "/outpost.goauthentik.io/auth/traefik"),
+}
+
+
+class VerifyUnavailable(RuntimeError):
+    """The single sign-on could not be reached to confirm a session."""
+
+
+class SessionVerifier:
+    """Confirm who signed in by asking the sign-on, not by trusting request headers.
+
+    A Traefik router defined by a container's own labels can reach the daemon's
+    service, add the proxy token and set ``Remote-User``/``Remote-Groups`` itself,
+    skipping the sign-on. So on a proxied request the daemon hands the request's
+    session cookie to the provider's verify endpoint and believes only the identity
+    that comes back: a router cannot produce the admin's cookie. The provider is
+    reached at its container address on the Docker network (never by name, never
+    over DNS), through the same guarded client the apps use. A positive answer is
+    cached for a short while, keyed by the cookie, so the provider is not asked on
+    every request.
+    """
+
+    TTL_SECONDS = 60.0
+    MAX_CACHE = 512
+
+    def __init__(
+        self,
+        provider: str,
+        user_header: str,
+        group_header: str,
+        *,
+        container: str | None = None,
+        addresses: Callable[[str], set[str]] = container_addresses,
+        fetch: Callable[..., Any] | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ):
+        self.container, self.port, self.path = SSO_VERIFY[provider]
+        if container:
+            self.container = container
+        self.user_header = user_header
+        self.group_header = group_header
+        self.addresses = addresses
+        self._fetch = fetch
+        self.clock = clock
+        self._cache: dict[str, tuple[float, tuple[str, str]]] = {}
+        self._lock = threading.Lock()
+
+    def __call__(self, cookie: str | None, forwarded: dict[str, str]) -> tuple[str, str] | None:
+        """The ``(user, groups)`` the provider vouches for, or ``None`` when nobody is."""
+        if not cookie:
+            return None
+        key = hashlib.sha256(cookie.encode("utf-8", "ignore")).hexdigest()
+        now = self.clock()
+        with self._lock:
+            hit = self._cache.get(key)
+            if hit is not None and hit[0] > now:
+                return hit[1]
+        identity = self._ask(cookie, forwarded)  # may raise VerifyUnavailable
+        if identity is not None:
+            with self._lock:
+                if len(self._cache) >= self.MAX_CACHE:
+                    self._cache.clear()
+                self._cache[key] = (now + self.TTL_SECONDS, identity)
+        return identity
+
+    def _ask(self, cookie: str, forwarded: dict[str, str]) -> tuple[str, str] | None:
+        fetch = self._fetch
+        if fetch is None:
+            from ..appsetup.http import fetch as fetch  # noqa: PLC0415
+        from ..appsetup.http import SetupError  # noqa: PLC0415
+
+        addresses = sorted(self.addresses(self.container))
+        if not addresses:
+            raise VerifyUnavailable(
+                f"the {self.container} container has no address on the Docker network"
+            )
+        headers = {"Cookie": cookie, **forwarded}
+        last: Exception | None = None
+        for address in addresses:
+            host = f"[{address}]" if ":" in address else address
+            url = f"http://{host}:{self.port}{self.path}"
+            try:
+                response = fetch("GET", url, dict(headers), None)
+            except SetupError as error:
+                last = error
+                continue
+            if response.status == 200:
+                user = (response.headers.get(self.user_header) or "").strip()
+                if not user:
+                    return None  # authorised, but a bypass rule, so nobody is signed in
+                return user, response.headers.get(self.group_header) or ""
+            if response.status in (401, 403):
+                return None
+            last = SetupError(f"{self.container} answered {response.status}")
+        raise VerifyUnavailable(
+            f"could not reach the {self.container} container to confirm the session"
+            + (f": {last}" if last else "")
+        )
+
+
 def is_loopback(host: object) -> bool:
     try:
         return ipaddress.ip_address(str(host)).is_loopback
@@ -303,6 +414,8 @@ class DaemonGuard:
         sso: str = "authelia",
         proxy_token: str | None = None,
         proxy_peer: Callable[[str], bool] | None = None,
+        session_verify: Callable[[str | None, dict[str, str]], tuple[str, str] | None]
+        | None = None,
     ):
         if sso not in SSO_HEADERS:
             raise ValueError(f"unknown single sign-on {sso!r}; one of {sorted(SSO_HEADERS)}")
@@ -310,6 +423,7 @@ class DaemonGuard:
         self.token = token.encode()
         self.proxy_token = proxy_token.encode() if proxy_token else None
         self.proxy_peer = proxy_peer
+        self.session_verify = session_verify
         self.admin_user = admin_user
         self.root_socket = root_socket
         self.tailscale_socket = tailscale_socket
@@ -379,17 +493,56 @@ class DaemonGuard:
             peer = str(client[0]) if client else ""
             if not peer or not await asyncio.to_thread(self.proxy_peer, peer):
                 return "only the reverse proxy may use this address"
-        return self._sso_refusal(headers) if self.admin_user is not None else None
+        if self.admin_user is None:
+            return None
+        if self.session_verify is not None:
+            return await self._verified_refusal(headers)
+        return self._sso_refusal(headers)
+
+    async def _verified_refusal(self, headers: Headers) -> str | None:
+        """Ask the sign-on itself who holds this session, and admit only the admin.
+
+        The ``Remote-*`` headers on a proxied request are not trusted here: a router a
+        container defined can set them. The provider is asked instead, with the request's
+        cookie and this app's own host, and its answer decides.
+        """
+        forwarded = {
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": headers.get("x-forwarded-host") or headers.get("host") or "",
+            "X-Forwarded-Uri": "/",
+            "X-Forwarded-Method": "GET",
+        }
+        try:
+            identity = await asyncio.to_thread(
+                self.session_verify, headers.get("cookie"), forwarded
+            )
+        except VerifyUnavailable as error:
+            log.error("refusing a proxied request: %s", error)
+            return (
+                "the single sign-on could not be reached to confirm the session; if this "
+                "persists, check it is running, or set SALTBOX_UI_VERIFY_SESSION=off"
+            )
+        if identity is None:
+            return (
+                "no signed-in session came with this request; this app needs single sign-on "
+                "(Authelia) in front of it, without a bypass rule"
+            )
+        return self._admin_refusal(*identity)
 
     def _sso_refusal(self, headers: Headers) -> str | None:
         """For proxied requests: the signed-in person must be the Saltbox admin."""
-        user = headers.get(self.user_header, "").strip()
+        return self._admin_refusal(
+            headers.get(self.user_header, ""), headers.get(self.group_header, "")
+        )
+
+    def _admin_refusal(self, user: str, groups_value: str) -> str | None:
+        user = (user or "").strip()
         if not user:
             return (
                 "no signed-in user came with this request; this app needs single sign-on "
                 "(Authelia) in front of it, without a bypass rule"
             )
-        groups = {g.strip().lower() for g in re.split(r"[,|]", headers.get(self.group_header, ""))}
+        groups = {g.strip().lower() for g in re.split(r"[,|]", groups_value or "")}
         admin = (self.admin_user() if self.admin_user else None) or ""
         if user.lower() == admin.lower() or self.ADMIN_GROUP in groups:
             return None
@@ -527,6 +680,9 @@ def create_app(
     sso: str = "authelia",
     proxy_token: str | None = None,
     proxy_peer: Callable[[str], bool] | None = None,
+    verify_session: bool = True,
+    sso_container: str | None = None,
+    session_verify: Callable[[str | None, dict[str, str]], tuple[str, str] | None] | None = None,
 ) -> FastAPI:
     services = services or Services(
         layout or Layout.from_env(),
@@ -538,6 +694,8 @@ def create_app(
         root_socket=root_socket,
         admin_check=admin_check,
         sso=sso,
+        verify_session=verify_session,
+        sso_container=sso_container,
     )
     app = FastAPI(
         title="saltbox-ui",
@@ -551,6 +709,15 @@ def create_app(
     app.include_router(router, prefix="/api")
     app.add_exception_handler(RecursionError, _too_deep)
     if services.token:
+        if (
+            session_verify is None
+            and services.admin_check
+            and services.verify_session
+            and services.proxy_token
+        ):
+            session_verify = SessionVerifier(
+                services.sso, *SSO_HEADERS[services.sso], container=services.sso_container
+            )
         app.add_middleware(
             DaemonGuard,
             token=services.token,
@@ -560,6 +727,7 @@ def create_app(
             sso=services.sso,
             proxy_token=services.proxy_token,
             proxy_peer=services.proxy_peer,
+            session_verify=session_verify,
         )
     app.add_middleware(Hardening)
     if services.web_dir and (services.web_dir / "index.html").exists():

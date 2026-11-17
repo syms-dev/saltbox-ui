@@ -487,12 +487,18 @@ def test_only_the_saltbox_admin_gets_in_through_the_proxy(
     scratch_layout.config_file("accounts").write_text("---\nuser:\n  name: seed\n")
 
     def traefik(**options) -> TestClient:
-        """Requests as Traefik makes them: to the bridge address, from its container."""
+        """Requests as Traefik makes them: to the bridge address, from its container.
+
+        ``verify_session=False`` keeps this test on the header-trust path, which the daemon
+        still uses on the loopback listener and as a fallback; confirming the session with
+        the sign-on itself is covered in ``tests/test_security.py``.
+        """
         services = Services(
             scratch_layout,
             token="local",
             proxy_token="s3cret",
             proxy_peer=lambda peer: peer == TRAEFIK,
+            verify_session=False,
             **options,
         )
         return TestClient(create_app(services=services), base_url=BRIDGE, client=(TRAEFIK, 40000))

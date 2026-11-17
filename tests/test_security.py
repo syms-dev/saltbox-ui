@@ -854,7 +854,20 @@ def test_settings_that_reach_other_programs_are_checked(scratch_layout: Layout) 
 
 
 # -- second review: what the first round of fixes left open -------------------------------------
-def proxied_app(layout: Layout, **options) -> object:
+def _fake_verify(cookie: str | None, forwarded: dict[str, str]) -> tuple[str, str] | None:
+    """Stand in for the sign-on in tests: a cookie ``who=<user>[;groups=<g>]`` is a session.
+
+    It models the real contract that matters for the guard: a valid session is proven by a
+    cookie the provider vouches for, never by a request header a router can set.
+    """
+    if not cookie:
+        return None
+    parts = dict(p.split("=", 1) for p in cookie.replace("&", ";").split(";") if "=" in p)
+    user = parts.get("who", "").strip()
+    return (user, parts.get("groups", "")) if user else None
+
+
+def proxied_app(layout: Layout, *, session_verify=_fake_verify, **options) -> object:
     services = Services(
         layout,
         token="local-token",
@@ -862,7 +875,7 @@ def proxied_app(layout: Layout, **options) -> object:
         proxy_peer=lambda peer: peer == TRAEFIK,
         **options,
     )
-    return create_app(services=services)
+    return create_app(services=services, session_verify=session_verify)
 
 
 def test_the_token_traefik_holds_is_not_the_daemons(scratch_layout: Layout) -> None:
@@ -874,7 +887,7 @@ def test_the_token_traefik_holds_is_not_the_daemons(scratch_layout: Layout) -> N
     app = proxied_app(scratch_layout)
     proxy = {"Authorization": "Bearer proxy-token"}
     local = {"Authorization": "Bearer local-token"}
-    admin = {"X-Forwarded-Host": "saltbox.example.com", "Remote-User": "seed"}
+    admin = {"X-Forwarded-Host": "saltbox.example.com", "Cookie": "who=seed"}
 
     def client(base: str, peer: str | None) -> TestClient:
         return TestClient(app, base_url=base, client=(peer, 40000) if peer else ("x", 1))
@@ -897,7 +910,7 @@ def test_the_token_traefik_holds_is_not_the_daemons(scratch_layout: Layout) -> N
     assert traefik.get("/api/meta", headers={**local, **admin}).status_code == 401
     # and from Traefik's address the token alone is still not enough
     assert traefik.get("/api/meta", headers=proxy).status_code == 403
-    assert traefik.get("/api/meta", headers={**proxy, "Remote-User": "guest"}).status_code == 403
+    assert traefik.get("/api/meta", headers={**proxy, "Cookie": "who=guest"}).status_code == 403
 
     import asyncio
 
@@ -938,6 +951,69 @@ def test_traefiks_address_is_asked_of_docker_but_not_in_a_loop() -> None:
     now[0] = 12.0  # Traefik restarted with another address: known after a few seconds
     assert peer("172.19.0.30") and len(asked) == 3
     assert not peer("172.19.0.2")
+
+
+def test_a_container_label_router_cannot_forge_the_admin(scratch_layout: Layout) -> None:
+    """A Traefik router a container defines in its own labels can reach the daemon's
+    service, add the proxy token and set Remote-User/Remote-Groups, skipping the sign-on.
+    So the daemon confirms the session with the sign-on itself: the forged headers, with
+    no session cookie, are refused; the same request with a real session is admitted."""
+    scratch_layout.config_file("accounts").write_text("---\nuser:\n  name: seed\n")
+    app = proxied_app(scratch_layout)  # the fake verifier honours only a cookie
+    traefik = TestClient(app, base_url=BRIDGE, client=(TRAEFIK, 40000))
+    proxy = {"Authorization": "Bearer proxy-token", "X-Forwarded-Host": "saltbox.example.com"}
+
+    # The attack: proxy token (readable by every container) + forged admin headers, no cookie.
+    forged = {**proxy, "Remote-User": "seed", "Remote-Groups": "admins"}
+    assert traefik.get("/api/meta", headers=forged).status_code == 403
+    assert traefik.post("/api/host/reboot", headers=forged).status_code == 403
+    # A real session (a cookie the sign-on vouches for) is admitted; headers are not consulted.
+    assert traefik.get("/api/meta", headers={**proxy, "Cookie": "who=seed"}).status_code == 200
+
+
+def test_the_session_is_confirmed_with_the_sign_on() -> None:
+    """SessionVerifier asks the provider, with the request cookie, who is signed in, and
+    believes only its answer; it caches a positive, and fails closed when it is unreachable."""
+    from saltbox_ui.daemon.app import SessionVerifier, VerifyUnavailable
+    from saltbox_ui.appsetup.http import Response, SetupError
+
+    calls: list[tuple[str, dict[str, str]]] = []
+
+    def fetch(method: str, url: str, headers: dict[str, str], body: object) -> Response:
+        calls.append((url, headers))
+        if headers.get("Cookie") not in {"authelia_session=good", "authelia_session=bypass"}:
+            return Response(401)
+        if headers.get("X-Forwarded-Host") == "bypassed.example.com":
+            return Response(200, headers={})  # authorised, but no identity (a bypass rule)
+        return Response(200, headers={"remote-user": "seed", "remote-groups": "admins,users"})
+
+    verify = SessionVerifier(
+        "authelia", "remote-user", "remote-groups",
+        addresses=lambda name: {"172.19.0.5"}, fetch=fetch,
+    )
+    fwd = {"X-Forwarded-Host": "saltbox.example.com"}
+    assert verify("authelia_session=good", fwd) == ("seed", "admins,users")
+    assert verify(None, fwd) is None and verify("authelia_session=bad", fwd) is None
+    assert verify("authelia_session=bypass", {"X-Forwarded-Host": "bypassed.example.com"}) is None
+    # the url is the container address and the verify path; the cookie is forwarded
+    assert calls[0][0] == "http://172.19.0.5:9091/api/verify"
+    # a positive is cached: asking again for the same cookie does not call the provider
+    before = len(calls)
+    assert verify("authelia_session=good", fwd) == ("seed", "admins,users")
+    assert len(calls) == before
+    # no address for the provider, or it cannot be reached: fail closed
+    unresolved = SessionVerifier("authelia", "remote-user", "remote-groups", addresses=lambda n: set())
+    with pytest.raises(VerifyUnavailable):
+        unresolved("authelia_session=good", fwd)
+
+    def refuse(method: str, url: str, headers: dict[str, str], body: object) -> Response:
+        raise SetupError("connection refused")
+
+    down = SessionVerifier(
+        "authelia", "remote-user", "remote-groups", addresses=lambda n: {"172.19.0.5"}, fetch=refuse
+    )
+    with pytest.raises(VerifyUnavailable):
+        down("authelia_session=good", fwd)
 
 
 def test_an_old_route_is_given_the_proxy_token(scratch_layout: Layout, tmp_path: Path) -> None:
