@@ -38,13 +38,27 @@ class Response:
         if not text:
             return None
         try:
-            return json.loads(text)
-        except (ValueError, RecursionError):  # not JSON, or nested absurdly deep
+            # Reject NaN, Infinity and 1e999: an app could otherwise put a value here that
+            # the daemon cannot send on in its own JSON answer (which would 500 the whole
+            # page). A non-finite number makes the answer parse as None, like any non-JSON.
+            return json.loads(text, parse_constant=_not_finite, parse_float=_finite_float)
+        except (ValueError, RecursionError):  # not JSON, non-finite, or nested absurdly deep
             return None
 
     @property
     def text(self) -> str:
         return self.body.decode("utf-8", errors="replace")
+
+
+def _not_finite(_: str) -> float:
+    raise ValueError("non-finite number in JSON")
+
+
+def _finite_float(value: str) -> float:
+    number = float(value)
+    if number != number or number in (float("inf"), float("-inf")):  # NaN or ±inf
+        raise ValueError("non-finite number in JSON")
+    return number
 
 
 Transport = Callable[[str, str, dict[str, str], bytes | None], Response]

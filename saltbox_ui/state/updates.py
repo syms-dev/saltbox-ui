@@ -100,7 +100,9 @@ class Registry:
             url = f"{realm}?{urllib.parse.urlencode(params)}"
             response = self.transport("GET", url, {"Accept": "application/json"}, None)
             data = response.json() if response.status == 200 else None
-            token = (data or {}).get("token") or (data or {}).get("access_token")
+            if not isinstance(data, dict):  # a list, string or number has no token to read
+                data = {}
+            token = data.get("token") or data.get("access_token")
             if not token:
                 raise SetupError(
                     f"{ref.registry}: no anonymous pull token (HTTP {response.status})"

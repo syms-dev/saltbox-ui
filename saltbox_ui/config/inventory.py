@@ -12,7 +12,7 @@ from typing import Any
 
 from ruamel.yaml.comments import CommentedMap
 
-from ..yamlio import coerce_scalar, load_yaml, save_yaml, to_plain
+from ..yamlio import coerce_scalar, load_yaml, refuse_duplicate_keys, save_yaml, to_plain
 
 INVENTORY_HEADER = (
     "---\n"
@@ -49,6 +49,7 @@ class Inventory:
         return to_plain(data[key]) if key in data else default
 
     def set(self, key: str, value: Any) -> None:
+        refuse_duplicate_keys(self.path)
         if isinstance(value, str):
             value = coerce_scalar(value)
         data = self.load()
@@ -56,12 +57,14 @@ class Inventory:
         save_yaml(self.path, data, header=INVENTORY_HEADER)
 
     def update(self, values: dict[str, Any]) -> None:
+        refuse_duplicate_keys(self.path)
         data = self.load()
         for key, value in values.items():
             data[key] = value
         save_yaml(self.path, data, header=INVENTORY_HEADER)
 
     def unset(self, key: str) -> bool:
+        refuse_duplicate_keys(self.path)
         data = self.load()
         if key not in data:
             return False

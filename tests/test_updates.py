@@ -520,3 +520,12 @@ def test_a_long_authentication_challenge_is_refused() -> None:
     reg = Registry.__new__(Registry)
     with pytest.raises(SetupError):
         Registry._token(reg, "Bearer " + "a" * 60_000, ImageRef("reg", "repo", "tag"))
+
+
+def test_a_non_dict_token_answer_is_handled_not_crashed() -> None:
+    from saltbox_ui.appsetup.http import Response, SetupError
+    from saltbox_ui.state.updates import ImageRef, Registry
+
+    reg = Registry(transport=lambda method, url, headers, body: Response(200, b'["not","a","dict"]'))
+    with pytest.raises(SetupError):  # treated as "no token", never an AttributeError
+        reg._token('Bearer realm="https://auth.example.com/token"', ImageRef("reg", "repo", "tag"))

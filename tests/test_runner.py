@@ -193,3 +193,26 @@ def test_a_pipes_output_is_read_in_bounded_lines(scratch_layout: Layout) -> None
     assert rc == 0
     assert lines and max(len(line) for line in lines) <= runner_mod.MAX_LINE_CHARS
     assert "short" in lines
+
+
+def test_status_polls_do_not_make_a_job_start_fail(scratch_layout: Layout, fake_sb: Path) -> None:
+    """Asking whether a job runs took the job lock to probe it, so a status poll could make
+    a job start lose the lock and be recorded failed. Probe and start no longer collide."""
+    import threading
+
+    runner = SbRunner(scratch_layout, sb=fake_sb)
+    stop = threading.Event()
+
+    def poll() -> None:
+        while not stop.is_set():
+            runner.is_locked()
+
+    watcher = threading.Thread(target=poll, daemon=True)
+    watcher.start()
+    try:
+        for _ in range(120):
+            job = runner.run([str(fake_sb), "list"], kind="list")
+            assert job.status == "succeeded", job.status
+    finally:
+        stop.set()
+        watcher.join(2)

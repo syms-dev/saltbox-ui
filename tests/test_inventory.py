@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from saltbox_ui.config import Inventory, instance_key, role_key
 
 
@@ -56,3 +58,17 @@ def test_overrides_grouped_by_scope(tmp_path: Path):
     assert inventory.effective("sonarr", "_docker_image_tag", "sonarr4k", "release") == "nightly"
     assert inventory.effective("sonarr", "_web_subdomain", "sonarr4k") == "tv4k"
     assert inventory.effective("sonarr", "_web_subdomain", "sonarr", "sonarr") == "sonarr"
+
+
+def test_a_structured_save_over_a_duplicate_key_is_refused(tmp_path: Path) -> None:
+    from saltbox_ui.config.inventory import Inventory
+    from saltbox_ui.yamlio import DuplicateKeys
+
+    path = tmp_path / "inv.yml"
+    path.write_text("a: 1\nsonarr_tag: first\nsonarr_tag: second  # the one Ansible uses\n")
+    inventory = Inventory(path)
+    with pytest.raises(DuplicateKeys):
+        inventory.update({"a": 2})
+    with pytest.raises(DuplicateKeys):
+        inventory.unset("a")
+    assert path.read_text().count("sonarr_tag:") == 2  # nothing was dropped

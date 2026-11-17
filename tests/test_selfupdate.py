@@ -344,3 +344,39 @@ def test_a_pipx_install_is_updated_through_pipx(
     monkeypatch.setattr(selfupdate, "installer", lambda **kw: None)
     status = selfupdate.status(package=tmp_path / "pkg", fetch=lambda url: release())
     assert status["can_update"] is False and "neither pip nor pipx" in status["detail"]
+
+
+@pytest.fixture(autouse=True)
+def _isolated_state(tmp_path, monkeypatch):
+    """Keep the source-update marker out of the real /var/lib/saltbox-ui during tests."""
+    monkeypatch.setenv("SALTBOX_UI_STATE", str(tmp_path / "state"))
+
+
+def test_a_source_update_that_fails_is_finished_by_the_next_run(
+    checkout, fake_npm: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A source update that pulled and then failed at pip used to be skipped as 'up to date',
+    leaving the daemon to restart without its new dependency. A marker makes the next run
+    finish it, and the status reports it as still available meanwhile."""
+    clone, work = checkout
+    source = clone / "ui"
+    push_change(work, "pyproject.toml", "[project]\nname = 'saltbox-ui'\nversion = '2'\n")
+
+    real = selfupdate.step
+    monkeypatch.setattr(selfupdate, "step", lambda args, **o: 1 if "pip" in args else real(args, **o))
+    assert selfupdate.update_source(source) == 1
+    assert selfupdate.source_update_unfinished() is True
+    assert selfupdate.status(package=source / "saltbox_ui", fetch=lambda url: [])[
+        "update_available"
+    ]
+
+    ran: list[list[str]] = []
+
+    def record(args, **o):
+        ran.append(args)
+        return 0 if "pip" in args else real(args, **o)
+
+    monkeypatch.setattr(selfupdate, "step", record)
+    assert selfupdate.update_source(source) == 0  # no new commit, but the update is finished
+    assert any("pip" in args for args in ran)  # pip ran on the resume despite no new commit
+    assert selfupdate.source_update_unfinished() is False

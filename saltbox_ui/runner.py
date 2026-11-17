@@ -24,6 +24,7 @@ import struct
 import subprocess
 import sys
 import termios
+import threading
 import time
 import uuid
 from collections.abc import Callable, Iterable
@@ -173,6 +174,10 @@ class SbRunner:
         self.lock_file = layout.lock_file
         self._process: subprocess.Popen[Any] | None = None
         self._cancelled = False
+        # Held only around the brief flock dance, so a status poll (is_locked) and a job
+        # start in this process never take the file lock at the same instant: without it a
+        # poll could hold the lock for the moment a start tries for it and fail the start.
+        self._probe_lock = threading.Lock()
 
     # -- command builders --------------------------------------------------
     def install_command(
@@ -318,10 +323,11 @@ class SbRunner:
         self.lock_file.parent.mkdir(parents=True, exist_ok=True)
         log_path = Path(job.log_path or self.jobs_dir / f"{job.id}.log")
         with open(self.lock_file, "a+", encoding="utf-8") as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as error:
-                raise JobRunning("another Saltbox job is already running") from error
+            with self._probe_lock:  # not while a poll holds the lock to probe it
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError as error:
+                    raise JobRunning("another Saltbox job is already running") from error
             lock.seek(0)
             lock.truncate()
             lock.write(json.dumps({"job": job.id, "pid": os.getpid(), "started": time.time()}))
@@ -572,7 +578,7 @@ class SbRunner:
         """Return the lock holder's record when a job is running, else ``None``."""
         if not self.lock_file.exists():
             return None
-        with open(self.lock_file, encoding="utf-8") as lock:
+        with open(self.lock_file, encoding="utf-8") as lock, self._probe_lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:

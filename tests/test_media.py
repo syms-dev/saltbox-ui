@@ -228,3 +228,12 @@ def test_vpn_warns_when_qbittorrent_is_outside_it(found: Discovery) -> None:
     status = media.vpn_status(found, containers, read_file=files)
     assert status["qbittorrent_protected"] is False and status["routed"] == []
     assert media.vpn_status(Discovery(), [], read_file=files) == {"configured": False}
+
+
+def test_a_non_finite_number_from_an_app_parses_as_no_answer() -> None:
+    """NaN/Infinity/1e999 in an app's JSON used to reach the daemon's own answer and make
+    FastAPI 500 the whole page; such a value now makes the answer parse as None."""
+    assert Response(200, b'{"progress": NaN}').json() is None
+    assert Response(200, b'{"x": Infinity}').json() is None
+    assert Response(200, b'{"x": 1e999}').json() is None
+    assert Response(200, b'{"progress": 0.5, "name": "ok"}').json() == {"progress": 0.5, "name": "ok"}

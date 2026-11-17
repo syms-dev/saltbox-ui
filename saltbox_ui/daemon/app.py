@@ -28,6 +28,7 @@ from ..catalog import Catalog
 from ..config import ConfigService, Inventory
 from ..layout import Layout
 from ..runner import SbRunner
+from ..yamlio import DuplicateKeys
 from .automation import AutomationService
 from .dismissals import Dismissals
 from .jobs import JobManager
@@ -708,6 +709,7 @@ def create_app(
     app.state.services = services
     app.include_router(router, prefix="/api")
     app.add_exception_handler(RecursionError, _too_deep)
+    app.add_exception_handler(DuplicateKeys, _duplicate_keys)
     if services.token:
         if (
             session_verify is None
@@ -749,6 +751,15 @@ def create_app(
 async def _too_deep(request: Any, error: Exception) -> JSONResponse:
     """JSON nested deeper than the parser will follow is a bad request, not a server error."""
     return JSONResponse({"detail": "request body is nested too deeply"}, status_code=400)
+
+
+async def _duplicate_keys(request: Any, error: Exception) -> JSONResponse:
+    """A structured save onto a file with a duplicate key is refused, not silently applied."""
+    keys = ", ".join(getattr(error, "keys", []))
+    return JSONResponse(
+        {"detail": f"this file has a duplicate key; fix it in the editor first: {keys}"},
+        status_code=422,
+    )
 
 
 def _mount_web(app: FastAPI, web_dir: Path) -> None:

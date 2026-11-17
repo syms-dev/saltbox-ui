@@ -33,7 +33,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from . import __version__, gitsafe
+from . import __version__, gitsafe, safefs
 from .state.repos import RepoStatus, check_repo
 
 PROJECT = "syms-dev/saltbox-ui"
@@ -130,6 +130,7 @@ def status(
     repo_status: Callable[[Path], RepoStatus | None] = check_repo,
     fetch: Fetch = fetch_json,
     which: Callable[[str], str | None] = shutil.which,
+    state_dir: Path | None = None,
 ) -> dict[str, Any]:
     """How this app is installed and whether a newer version is there to update to."""
     result: dict[str, Any] = {
@@ -158,6 +159,9 @@ def status(
         }
         result["update_available"] = found.status == "update"
         result["detail"] = found.detail
+        if source_update_unfinished(state_dir):  # a previous update stopped after the pull
+            result["update_available"] = True
+            result["detail"] = "a previous update did not finish; run it again to finish it"
         if found.status == "unknown":
             result["can_update"] = False
         elif which("npm") is None:
@@ -236,12 +240,30 @@ def step(
         return 127
 
 
-def update_source(source: Path) -> int:
+def source_marker(state_dir: Path | None = None) -> Path:
+    """The file that records a source update started but not finished."""
+    if state_dir is None:
+        from .layout import Layout
+
+        state_dir = Layout.from_env().state_dir
+    return Path(state_dir) / "source-update"
+
+
+def source_update_unfinished(state_dir: Path | None = None) -> bool:
+    return source_marker(state_dir).exists()
+
+
+def update_source(source: Path, *, state_dir: Path | None = None) -> int:
     checkout = checkout_of(source)
     if checkout is None:
         say(f"{source} is not a git checkout")
         return 1
+    marker = source_marker(state_dir)
+    resuming = marker.exists()  # a previous run pulled, then pip or npm failed
     before = head_commit(source)
+    # The point the running code was last consistent at: across runs, so a run that fails
+    # after the pull is finished by the next one instead of being skipped as "up to date".
+    baseline = marker.read_text(encoding="utf-8").strip() if resuming else before
     # git runs as the checkout's owner throughout: its config and hooks are theirs.
     try:
         owner = gitsafe.owner_of(checkout)
@@ -258,14 +280,18 @@ def update_source(source: Path) -> int:
         say("git could not fast-forward; the checkout has changes of its own to sort out first")
         return 1
     after = head_commit(source)
-    if before == after:
+    if not resuming and before == after:
         say("Already up to date.")
         return 0
+    # There is work: a new commit now, or a previous update to finish. Record the baseline so
+    # that if this run fails after here, the next one finishes it rather than skipping it.
+    if not resuming:
+        safefs.write_private(marker, str(baseline or ""))
     path = str((source / "pyproject.toml").relative_to(checkout))
     changed = gitsafe.run(
-        checkout, ["diff", "--name-only", f"{before}..{after}", "--", path]
+        checkout, ["diff", "--name-only", f"{baseline}..{after}", "--", path]
     ).stdout.strip()
-    if changed:
+    if changed or resuming:  # on a resume, install regardless: the last run may have failed here
         say("The package's dependencies changed; installing them.")
         if step([sys.executable, "-I", "-m", "pip", "install", "--quiet", "-e", str(source)]) != 0:
             say("pip failed. The new code may need packages that are not installed.")
@@ -277,7 +303,8 @@ def update_source(source: Path) -> int:
     for arguments in (["ci", "--no-audit", "--no-fund"], ["run", "build"]):
         if step([npm, *arguments], cwd=source / "web") != 0:
             return 1
-    say(f"Updated from {str(before)[:7]} to {str(after)[:7]}. The daemon restarts now.")
+    marker.unlink(missing_ok=True)  # finished: nothing to resume
+    say(f"Updated from {str(baseline)[:7]} to {str(after)[:7]}. The daemon restarts now.")
     return 0
 
 

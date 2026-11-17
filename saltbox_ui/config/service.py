@@ -26,6 +26,7 @@ from ..yamlio import (
     find_duplicate_keys,
     get_path,
     load_yaml,
+    refuse_duplicate_keys,
     save_yaml,
     set_path,
     to_plain,
@@ -160,6 +161,7 @@ class ConfigService:
         return to_plain(get_path(self.load(name), dotted))
 
     def set(self, name: str, dotted: str, value: Any) -> None:
+        refuse_duplicate_keys(self.path(name))
         if isinstance(value, str):
             value = coerce_scalar(value)
         data = self.load(name)

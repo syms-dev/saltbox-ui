@@ -124,6 +124,28 @@ def write_atomic(
         raise
 
 
+class DuplicateKeys(ValueError):
+    """A file holds the same mapping key twice, so a structured save would drop one."""
+
+    def __init__(self, keys: list[str]):
+        self.keys = keys
+        super().__init__(f"duplicate keys: {', '.join(keys)}")
+
+
+def refuse_duplicate_keys(path: Path) -> None:
+    """Raise ``DuplicateKeys`` when the file on disk has a duplicate mapping key.
+
+    A structured save loads the file, changes one key and writes it back. ruamel keeps the
+    first of two duplicate keys and drops the rest, while Ansible keeps the last, so such a
+    save would silently change which value is in force. The whole-file editor already
+    refuses duplicates; the structured saves call this first so they do too.
+    """
+    if path.exists():
+        duplicates = find_duplicate_keys(path.read_text(encoding="utf-8"))
+        if duplicates:
+            raise DuplicateKeys(duplicates)
+
+
 def find_duplicate_keys(text: str) -> list[str]:
     """Return dotted paths of duplicated mapping keys, like ``sb validate-config``.
 
