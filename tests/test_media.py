@@ -238,3 +238,24 @@ def test_a_non_finite_number_from_an_app_parses_as_no_answer() -> None:
     assert Response(200, b'{"x": 1e999}').json() is None
     good = Response(200, b'{"progress": 0.5, "name": "ok"}').json()
     assert good == {"progress": 0.5, "name": "ok"}
+
+
+def test_a_film_shows_the_release_that_falls_this_week() -> None:
+    """Radarr lists a film when any of its releases is in the window; the card used to show
+    the digital date even when this week's event was the cinema release, months earlier."""
+    in_cinemas = {
+        "title": "F",
+        "year": 2026,
+        "inCinemas": "2026-11-14T00:00:00Z",
+        "digitalRelease": "2027-02-01T00:00:00Z",
+    }
+    item = media._calendar_item(in_cinemas, "movie", "radarr", "2026-11-12")
+    assert item["date"].startswith("2026-11-14") and item["subtitle"] == "2026 · in cinemas"
+    on_disc = {
+        "title": "G",
+        "year": 2025,
+        "inCinemas": "2025-06-01T00:00:00Z",
+        "digitalRelease": "2026-11-13T00:00:00Z",
+    }
+    item = media._calendar_item(on_disc, "movie", "radarr", "2026-11-12")
+    assert item["date"].startswith("2026-11-13") and item["subtitle"] == "2025 · digital release"

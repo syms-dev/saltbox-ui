@@ -727,3 +727,40 @@ def test_a_bazarr_config_with_merge_keys_is_refused(tmp_path: Path) -> None:
     assert read_bazarr_settings(tmp_path / "bazarr", tmp_path) == {
         "general": {"auth": {"apikey": "x"}}
     }
+
+
+def test_arr_requests_name_the_container_but_go_to_its_address() -> None:
+    """Saltbox sets AllowedHosts on the *arr apps (their domain and Docker names), and they
+    answer any other Host with "400 Bad Request - Invalid Hostname". Every *arr request
+    therefore names the container in Host while connecting to the resolved address."""
+    from saltbox_ui.appsetup.discover import Service, arr_client
+    from saltbox_ui.appsetup.http import Response
+
+    seen: list[tuple[str, dict[str, str]]] = []
+
+    def transport(method: str, url: str, headers: dict[str, str], body: bytes | None) -> Response:
+        seen.append((url, headers))
+        return Response(200, b"[]")
+
+    for role, port, version in (("sonarr", 8989, "v3"), ("prowlarr", 9696, "v1")):
+        svc = Service(role, f"{role}4k", port, True, host="172.19.0.7", api_key="k")
+        arr_client(svc, transport).get("/system/status")
+        url, headers = seen[-1]
+        assert url == f"http://172.19.0.7:{port}/api/{version}/system/status"
+        assert headers["Host"] == f"{role}4k:{port}" and headers["X-Api-Key"] == "k"
+
+
+def test_an_html_error_page_reads_as_its_message() -> None:
+    from saltbox_ui.appsetup.http import Response, describe_error
+
+    page = (
+        b'<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN""http://www.w3.org/TR/html4/strict.dtd">'
+        b'\n<HTML><HEAD><TITLE>Bad Request</TITLE>\n<META HTTP-EQUIV="Content-Type" '
+        b'Content="text/html; charset=us-ascii"></ HEAD >\n<BODY><h2>Bad Request - Invalid '
+        b"Hostname</h2>\n<hr><p>HTTP Error 400. The request hostname is invalid.</p>\n"
+        b"</BODY></HTML>"
+    )
+    assert describe_error(Response(400, page)) == (
+        "Bad Request - Invalid Hostname HTTP Error 400. The request hostname is invalid."
+    )
+    assert describe_error(Response(500, b"plain words")) == "plain words"

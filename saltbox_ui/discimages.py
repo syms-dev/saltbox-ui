@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .appsetup.discover import Service
+from .appsetup.discover import Service, arr_client
 from .appsetup.http import Client, SetupError, Transport
 
 EXTENSIONS = (".iso", ".img")
@@ -25,12 +25,7 @@ DVD_QUALITIES = {2, 23}  # Radarr's "DVD" and "DVD-R": what a disc image counts 
 
 
 def _client(service: Service, transport: Transport | None) -> Client:
-    return Client(
-        f"{service.host_url}/api/v3",
-        headers={"X-Api-Key": service.api_key},
-        transport=transport,
-        name=service.name,
-    )
+    return arr_client(service, transport)
 
 
 def allows_dvd(profile: dict[str, Any]) -> bool:

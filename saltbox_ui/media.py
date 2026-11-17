@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from .appsetup.discover import Discovery, Service
+from .appsetup.discover import Discovery, Service, arr_client
 from .appsetup.http import Client, Response, SetupError, Transport
 from .appsetup.tasks import SabClient, session_cookie
 from .appsetup.vpnport import docker_cat, forwarded_port
@@ -220,12 +220,7 @@ def upcoming(
         for service in found.installed(role):
             if not service.api_key:
                 continue
-            client = Client(
-                f"{service.host_url}/api/v3",
-                headers={"X-Api-Key": service.api_key},
-                transport=transport,
-                name=service.name,
-            )
+            client = arr_client(service, transport)
             params = {"start": start, "end": end, "unmonitored": "false"}
             if role == "sonarr":
                 params["includeSeries"] = "true"
@@ -235,7 +230,7 @@ def upcoming(
                 errors.append(str(error))
                 continue
             for entry in entries:
-                items.append(_calendar_item(entry, kind, service.name))
+                items.append(_calendar_item(entry, kind, service.name, start))
     items.sort(key=lambda i: i["date"] or "9999")
     return {"items": items[:UPCOMING_LIMIT], "errors": errors}
 
@@ -244,7 +239,7 @@ def _episode_code(season: object, episode: object) -> str:
     return f"S{int(season or 0):02d}E{int(episode or 0):02d}"  # type: ignore[call-overload]
 
 
-def _calendar_item(entry: dict[str, Any], kind: str, app: str) -> dict[str, Any]:
+def _calendar_item(entry: dict[str, Any], kind: str, app: str, start: str = "") -> dict[str, Any]:
     if kind == "episode":
         series = entry.get("series") or {}
         return {
@@ -256,13 +251,26 @@ def _calendar_item(entry: dict[str, Any], kind: str, app: str) -> dict[str, Any]
             "date": str(entry.get("airDateUtc") or entry.get("airDate") or ""),
             "downloaded": bool(entry.get("hasFile")),
         }
-    dates = [entry.get(k) for k in ("digitalRelease", "physicalRelease", "inCinemas")]
+    # Radarr lists a film when any of its releases falls in the window. Show that release
+    # (the next one from today), not always the digital date, which can be months away.
+    releases = [
+        (str(entry.get(key)), label)
+        for key, label in (
+            ("inCinemas", "in cinemas"),
+            ("digitalRelease", "digital release"),
+            ("physicalRelease", "physical release"),
+        )
+        if entry.get(key)
+    ]
+    coming = sorted(r for r in releases if r[0][:10] >= start) or sorted(releases)
+    date, label = coming[0] if coming else ("", "")
+    year = str(entry.get("year", "") or "")
     return {
         "kind": kind,
         "app": app,
         "title": str(entry.get("title", "")),
-        "subtitle": str(entry.get("year", "")),
-        "date": str(next((d for d in dates if d), "")),
+        "subtitle": " · ".join(part for part in (year, label) if part),
+        "date": date,
         "downloaded": bool(entry.get("hasFile")),
     }
 

@@ -19,8 +19,8 @@ from secrets import token_hex
 from typing import Any
 
 from . import safefs
-from .appsetup.discover import API_VERSION, Discovery, Service
-from .appsetup.http import Client, Transport
+from .appsetup.discover import Discovery, Service, arr_client
+from .appsetup.http import Transport
 from .layout import Layout
 
 MARKER = "# Managed by the Saltbox UI"
@@ -209,15 +209,6 @@ def write_config(
 # Recyclarr creates profiles; it never moves a show or a film onto one. Sonarr and Radarr
 # keep using whatever profile each item already had, so a sync alone changes nothing visible.
 LIBRARY = {"sonarr": ("series", "seriesIds", "series"), "radarr": ("movie", "movieIds", "films")}
-
-
-def arr_client(service: Service, transport: Transport | None) -> Client:
-    return Client(
-        f"{service.host_url}/api/{API_VERSION[service.role]}",
-        headers={"X-Api-Key": service.api_key},
-        transport=transport,
-        name=service.name,
-    )
 
 
 def selected_names(text: str, app: str) -> list[str]:

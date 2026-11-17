@@ -8,8 +8,10 @@ network with in-memory fakes.
 from __future__ import annotations
 
 import contextlib
+import html
 import http.client
 import json
+import re
 import socket
 import ssl
 import threading
@@ -236,8 +238,23 @@ def describe_error(response: Response) -> str:
                 messages.append(str(data[key]))
                 break
     if not messages and response.text.strip():
-        messages.append(response.text.strip()[:200])
+        messages.append(_plain(response.text)[:200])
     return "; ".join(messages) or f"HTTP {response.status}"
+
+
+_HEAD = re.compile(r"<head\b.*?</\s*head\s*>", re.I | re.S)
+_TAG = re.compile(r"<[^>]{0,1000}>")
+
+
+def _plain(text: str) -> str:
+    """An HTML error page as the words on it ("Bad Request - Invalid Hostname. HTTP Error
+    400. ..."), so the first 200 characters say what went wrong, not the doctype."""
+    stripped = text.strip()
+    if not stripped.startswith("<"):
+        return stripped
+    words = _TAG.sub(" ", _HEAD.sub(" ", stripped[:20000]))
+    words = html.unescape(" ".join(words.split()))
+    return words or stripped
 
 
 class Client:

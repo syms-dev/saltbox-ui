@@ -234,7 +234,7 @@ function UpcomingCard({ upcoming }: { upcoming: NonNullable<MediaSnapshot['upcom
       </h3>
       {!upcoming.available ? (
         <p className="muted small">{upcoming.error}</p>
-      ) : upcoming.items.length === 0 ? (
+      ) : upcoming.items.length === 0 && upcoming.errors.length > 0 ? null : upcoming.items.length === 0 ? (
         <p className="muted small">Nothing monitored airs or releases this week.</p>
       ) : (
         <div className="stack-sm">
@@ -262,6 +262,14 @@ function UpcomingCard({ upcoming }: { upcoming: NonNullable<MediaSnapshot['upcom
           ))}
         </div>
       )}
+      {upcoming.available && upcoming.errors.length > 0 ? (
+        // An app that could not be asked is said, not shown as "nothing this week".
+        <ul aria-label="Calendars that could not be read" className="muted small">
+          {upcoming.errors.map((error) => (
+            <li key={error}>Could not read {error}</li>
+          ))}
+        </ul>
+      ) : null}
     </section>
   );
 }
@@ -270,15 +278,25 @@ function UpcomingCard({ upcoming }: { upcoming: NonNullable<MediaSnapshot['upcom
 export function MediaRow({ media }: { media: MediaSnapshot | undefined }): React.ReactNode {
   if (media === undefined) return null;
   const vpnShown = media.vpn !== undefined && !(media.vpn.available && !media.vpn.configured);
+  const upcomingShown =
+    media.upcoming !== undefined &&
+    (!media.upcoming.available || media.upcoming.items.length > 0 || media.upcoming.errors.length > 0);
   const anything =
-    vpnShown || media.qbittorrent !== undefined || media.sabnzbd !== undefined || media.plex !== undefined;
+    vpnShown ||
+    upcomingShown ||
+    media.qbittorrent !== undefined ||
+    media.sabnzbd !== undefined ||
+    media.plex !== undefined;
   if (!anything) return null;
   const cards = [
     media.vpn === undefined ? null : <VpnCard key="vpn" vpn={media.vpn} />,
     <DownloadsCard key="downloads" media={media} />,
     media.plex === undefined ? null : <PlayingCard key="plex" plex={media.plex} />,
     media.upcoming === undefined ||
-    (media.upcoming.available && media.upcoming.items.length === 0 && media.plex === undefined) ? null : (
+    (media.upcoming.available &&
+      media.upcoming.items.length === 0 &&
+      media.upcoming.errors.length === 0 &&
+      media.plex === undefined) ? null : (
       <UpcomingCard key="upcoming" upcoming={media.upcoming} />
     ),
   ];

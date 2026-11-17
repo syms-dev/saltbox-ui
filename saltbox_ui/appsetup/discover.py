@@ -21,6 +21,7 @@ from .. import safefs
 from ..config import ConfigService, Inventory
 from ..layout import Layout
 from ..plex import read_plex_facts
+from .http import Client, Transport
 
 # Saltbox's default web ports (``<role>_role_web_port``); the inventory may override them.
 DEFAULT_PORTS = {
@@ -61,6 +62,22 @@ class Service:
     @property
     def host_url(self) -> str:
         return f"http://{self.host or self.name}:{self.port}"
+
+
+def arr_client(service: Service, transport: Transport | None = None) -> Client:
+    """A client for one *arr app's API (Sonarr, Radarr, Lidarr, Prowlarr).
+
+    Saltbox sets ``AllowedHosts`` in each *arr app's config.xml to its public domain and
+    its Docker names, and the apps refuse any other ``Host`` with "400 Bad Request -
+    Invalid Hostname". The connection still goes to the container's address (never
+    through DNS); the request just names the container, as another container would.
+    """
+    return Client(
+        f"{service.host_url}/api/{API_VERSION[service.role]}",
+        headers={"X-Api-Key": service.api_key, "Host": f"{service.name}:{service.port}"},
+        transport=transport,
+        name=service.name,
+    )
 
 
 @dataclass

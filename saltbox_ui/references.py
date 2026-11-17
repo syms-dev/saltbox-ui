@@ -23,7 +23,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from . import safefs
-from .appsetup.discover import Discovery, Service
+from .appsetup.discover import Discovery, Service, arr_client
 from .appsetup.http import Client, SetupError, Transport
 from .layout import Layout
 
@@ -171,12 +171,7 @@ def _checked(layout: Layout, folder: str) -> Any:
 
 # -- Prowlarr -------------------------------------------------------------------------------
 def _prowlarr(service: Service, transport: Transport | None) -> Client:
-    return Client(
-        f"{service.host_url}/api/v1",
-        headers={"X-Api-Key": service.api_key},
-        transport=transport,
-        name=service.name,
-    )
+    return arr_client(service, transport)
 
 
 def _base_url(item: dict[str, Any]) -> str:

@@ -23,7 +23,7 @@ from typing import Any
 
 from .. import safefs
 from . import vpnport
-from .discover import API_VERSION, ARR_ROLES, Discovery, Service
+from .discover import ARR_ROLES, Discovery, Service, arr_client
 from .http import Client, Response, SetupError, Transport
 
 MEDIA_ROOT = "/mnt/unionfs/Media"
@@ -214,13 +214,7 @@ class SetupContext:
 
     # -- clients -----------------------------------------------------------
     def arr(self, service: Service) -> Client:
-        version = API_VERSION[service.role]
-        return Client(
-            f"{service.host_url}/api/{version}",
-            headers={"X-Api-Key": service.api_key},
-            transport=self.transport,
-            name=service.name,
-        )
+        return arr_client(service, self.transport)
 
     def plex(self, service: Service) -> Client:
         return Client(
