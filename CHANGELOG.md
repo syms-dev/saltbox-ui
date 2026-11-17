@@ -3,6 +3,50 @@
 Notable changes to Saltbox UI. Versions match the GitHub releases; dates are UTC.
 This file is kept by hand so the history reads the way the work actually went.
 
+## [0.2.5] — 2026-11-17
+
+A bug hunt: eight things noticed in daily use, seven fixed here.
+
+### Fixed
+
+- **Connections no longer list problems for Sonarr, Radarr and Prowlarr that
+  are not there.** Saltbox limits the hostnames the *arr apps answer to
+  (`AllowedHosts`), and the daemon talked to them by container IP, so each
+  request got "400 Bad Request – Invalid Hostname". Requests still go to the
+  container's IP but now name the app as Saltbox's own containers do
+  (`Host: sonarr:8989`). Errors from an app are shown as plain text rather than
+  its HTML error page.
+- **Coming up shows what is on its way.** It read the same calendars, so it was
+  empty for the same reason. Films are now listed by their next release after
+  today (in cinemas, digital or physical, whichever is first) and say which.
+  When a calendar cannot be read, the card says which one rather than
+  "Nothing monitored".
+- **Home and the Apps page load faster.** One request read and parsed the
+  Saltbox inventory about two hundred times; it is now parsed once per change
+  to the file. The container list comes from two `docker` commands instead of
+  one Docker API call per container (about 1.5 s for 22 containers on the test
+  box) and is reused for three seconds, cleared whenever a container is
+  started, stopped, restarted, removed or installed.
+- **A finished update goes away at once.** When an install or update job ends,
+  the images it pulled are marked current straight away and every page
+  showing apps and updates refreshes. Update buttons are disabled while a job
+  runs, so the same update can no longer be started twice.
+
+### Added
+
+- **What an update brings:** the app page, the Apps list and the updates card on
+  Home show the version an app is on and the one it would move to (for example
+  `4.0.10 → 4.0.11`), read from the published image's labels, with a link to
+  the app's releases where it has one.
+
+### Changed
+
+- **Discover hides installed apps** by default; untick "Hide installed" to see
+  them. Searching still finds everything.
+- **Tailscale:** the "Web app over Tailscale" card now gives the address to
+  open in a browser. The `ssh` command it used to show moved to its own section,
+  "Server terminal over Tailscale".
+
 ## [0.2.4] — 2026-11-17
 
 ### Security
