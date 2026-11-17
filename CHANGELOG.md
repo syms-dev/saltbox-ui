@@ -3,6 +3,18 @@
 Notable changes to Saltbox UI. Versions match the GitHub releases; dates are UTC.
 This file is kept by hand so the history reads the way the work actually went.
 
+## [0.2.6] — 2026-11-17
+
+### Changed
+
+- **A new Library page** holds quality profiles (Recyclarr), disc images and
+  seeding limits, which used to sit at the top of Connect apps. They are about
+  how your shows and films are handled, not about connecting apps, so they were
+  hard to find there. Connect apps now holds only the connections. On a phone,
+  the Apps page links to both. Search finds the page under "quality profiles",
+  "disc images" and "seeding", and the seeding line on Home opens it. The
+  advice shown for disc-image errors in app logs points there too.
+
 ## [0.2.5] — 2026-11-17
 
 A bug hunt: eight things noticed in daily use, seven fixed here.
@@ -31,6 +43,9 @@ A bug hunt: eight things noticed in daily use, seven fixed here.
   the images it pulled are marked current straight away and every page
   showing apps and updates refreshes. Update buttons are disabled while a job
   runs, so the same update can no longer be started twice.
+- The sidebar is a named landmark ("Sidebar"), so screen readers can tell it
+  from Home's side rail, and the end-to-end test that reads it no longer
+  matches both.
 
 ### Added
 
