@@ -89,7 +89,7 @@ test.describe('home', () => {
     await expect(first).toContainText('Drive /dev/sdb is failing its health check', { timeout: 20_000 });
     await expect(first).toContainText('WDC WD80EFAX-68KNBN0 · 8.0 TB. Reallocated Sectors Count is 24.');
     await first.getByRole('link', { name: 'Drive health' }).click();
-    await expect(page).toHaveURL(/\/system#drives$/);
+    await expect(page).toHaveURL(/\/health#drives$/);
     const drives = page.getByRole('region', { name: 'Drive health' });
     await expect(drives).toBeInViewport();
     await expect(drives.getByRole('alert')).toContainText('1 of 3 drives is failing');
@@ -134,7 +134,7 @@ test.describe('home', () => {
     const held = attention.getByRole('listitem').filter({ hasText: 'Autoscan is holding back every scan' });
     await expect(held).toContainText('Autoscan logged it 3 times in the last day.');
     await held.getByRole('link', { name: 'How to fix it' }).click();
-    await expect(page).toHaveURL(/\/system#problems$/);
+    await expect(page).toHaveURL(/\/health#problems$/);
     const problems = page.getByRole('region', { name: 'Problems in app logs' });
     await expect(problems).toBeInViewport();
     await expect(problems.getByRole('article')).toHaveCount(3);
@@ -215,7 +215,7 @@ test.describe('home', () => {
     await expect(updates).toContainText('4 app updates available', { timeout: 20_000 });
     await expect(updates).toContainText('Authelia, Gluetun, Sonarr, Traefik Proxy');
     await expect(updates).not.toContainText('authelia-redis');
-    const hero = page.locator('header').filter({ hasText: 'containers running' });
+    const hero = page.locator('header').filter({ hasText: /attention|Everything/ });
     await expect(hero).not.toContainText('apps installed'); // not "0 apps installed" while it loads
     release();
     await expect(hero).toContainText('13 apps installed');
@@ -282,12 +282,18 @@ test.describe('navigation and search', () => {
   test('every menu entry opens its page; old links and unknown pages are handled', async ({ page }) => {
     await page.goto('/');
     for (const [name, heading] of [
-      ['Apps', 'Apps'],
-      ['Library', 'Library'],
+      ['Updates', 'Updates'],
       ['Activity', 'Activity'],
-      ['System', 'System'],
+      ['Installed', 'Apps'],
+      ['Discover', 'Apps'],
+      ['Library', 'Library'],
       ['Connect apps', 'Connect apps'],
-      ['Config', 'Config'],
+      ['Health', 'Health'],
+      ['Storage', 'Storage'],
+      ['Network & access', 'Network & access'],
+      ['Backups', 'Backups'],
+      ['Automation', 'Automation'],
+      ['Config files', 'Config files'],
       ['Home', /attention|Everything/],
     ] as const) {
       await page
@@ -300,6 +306,11 @@ test.describe('navigation and search', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Sonarr' })).toBeVisible();
     await page.goto('/jobs');
     await expect(page).toHaveURL(/\/activity$/);
+    // System was split up: its old links land where each part went.
+    await page.goto('/system');
+    await expect(page).toHaveURL(/\/health$/);
+    await page.goto('/system#saltbox-ui');
+    await expect(page).toHaveURL(/\/updates#saltbox-ui$/);
     await page.goto('/no/such/page');
     await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();
   });
@@ -315,9 +326,9 @@ test.describe('navigation and search', () => {
     await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { level: 1, name: 'Radarr' })).toBeVisible();
     await page.keyboard.press('/');
-    await page.keyboard.type('system');
+    await page.keyboard.type('health');
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('heading', { level: 1, name: 'System' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Health' })).toBeVisible();
     await page.keyboard.press('Control+k');
     await page.keyboard.press('Escape');
     await expect(palette).toBeHidden();
@@ -471,7 +482,7 @@ test.describe('activity', () => {
   });
 
   test('sb update shows its announcements and waits to be told about migrations', async ({ page }) => {
-    await page.goto('/system');
+    await page.goto('/updates');
     await expect(page.getByText(/saltbox: master at \w{7} → \w{7}/)).toBeVisible({ timeout: 20_000 });
     await page.getByRole('button', { name: 'Run sb update' }).click();
     expect(await confirm(page, 'Update Saltbox?', 'Run sb update')).toContain('waits for you');
@@ -501,14 +512,15 @@ test.describe('activity', () => {
 
 test.describe('system and setup', () => {
   test('shows storage, mounts and services', async ({ page }) => {
-    await page.goto('/system');
-    await expect(page.getByRole('region', { name: 'Storage' }).getByRole('meter').first()).toBeVisible();
+    await page.goto('/storage');
+    await expect(page.getByRole('region', { name: 'Disks' }).getByRole('meter').first()).toBeVisible();
     await expect(page.getByRole('region', { name: 'Mounts' })).toBeVisible();
+    await page.goto('/health');
     await expect(page.getByRole('region', { name: 'Saltbox services' })).toBeVisible();
   });
 
   test('shows resource use, Tailscale and backups, and backs up on request', async ({ page }) => {
-    await page.goto('/system');
+    await page.goto('/health');
     // Busiest first to begin with; any column sorts, and the rest of the containers are a click away.
     const use = page.getByRole('table', { name: 'Container resource use' });
     await expect(use.getByRole('row').nth(1)).toContainText('plex');
@@ -520,9 +532,11 @@ test.describe('system and setup', () => {
     await expect(use.getByRole('row').nth(1)).toContainText('plex');
     await page.getByRole('button', { name: /^Show all \d+ containers$/ }).click();
     expect(await use.getByRole('row').count()).toBeGreaterThan(9);
+    await page.goto('/network');
     const tailscale = page.getByRole('region', { name: 'Tailscale' });
     await expect(tailscale).toContainText('Connected');
     await expect(tailscale).toContainText('ssh seed@saltbox');
+    await page.goto('/backups');
     const backups = page.getByRole('region', { name: 'Backups' });
     await expect(backups).toContainText('weekly');
     await backups.getByRole('button', { name: 'Back up now' }).click();
@@ -534,7 +548,7 @@ test.describe('system and setup', () => {
   });
 
   test('opens the web app over Tailscale and closes it again', async ({ page }) => {
-    await page.goto('/system');
+    await page.goto('/network');
     const tailscale = page.getByRole('region', { name: 'Tailscale' });
     await tailscale.getByRole('button', { name: 'Turn on' }).click();
     expect(await confirm(page, 'Open the web app over Tailscale?', 'Turn on')).toContain('owner@example.com');
@@ -788,7 +802,7 @@ test.describe('updating Saltbox UI itself', () => {
     // A mark beside the version in the sidebar says so on every page, and leads to the update.
     const sidebar = page.getByRole('complementary', { name: 'Sidebar' });
     await sidebar.getByRole('link', { name: 'Update available. New commits are available (2222222).' }).click();
-    await expect(page).toHaveURL(/\/system#saltbox-ui$/);
+    await expect(page).toHaveURL(/\/updates#saltbox-ui$/);
     const card = page.getByRole('region', { name: 'Saltbox UI version' });
     await expect(card).toBeInViewport();
     await expect(card).toContainText(/\d+\.\d+\.\d+, running from a source checkout at 1111111/);
@@ -800,7 +814,7 @@ test.describe('updating Saltbox UI itself', () => {
       'Updated from 1111111 to 2222222. The daemon restarts now.',
     );
 
-    await page.goto('/system');
+    await page.goto('/updates');
     const after = page.getByRole('region', { name: 'Saltbox UI version' });
     await expect(after).toContainText('Up to date.');
     await expect(after.getByRole('button', { name: 'Update Saltbox UI' })).toBeDisabled();

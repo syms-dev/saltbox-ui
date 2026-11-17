@@ -18,6 +18,7 @@ import {
   useMedia,
   useOverview,
   useProblems,
+  useResources,
   useSelf,
   useStartJob,
   useUpdates,
@@ -30,7 +31,7 @@ import { Meter } from '../components/meter';
 import { ErrorMessage, Loading } from '../components/query-state';
 import { jobTitle } from '../components/shell';
 import { StatusDot } from '../components/status-dot';
-import { formatBytes, formatRelative } from '../format';
+import { formatBytes, formatRelative, formatUptime } from '../format';
 import { useContainerActions, useJobActions } from '../lib/actions';
 import { usePins } from '../lib/pins';
 import { appHealth, hostOf } from '../lib/status';
@@ -246,7 +247,13 @@ function UpdatesCard({ apps }: { apps: App[] }): React.ReactNode {
   const behind = repos.filter((repo) => repo.status === 'update');
   return (
     <section aria-labelledby="updates-title" className="card">
-      <h3 id="updates-title">Updates</h3>
+      <div className={styles['sectionHead']}>
+        <h2 id="updates-title">Updates</h2>
+        <span className="spacer" />
+        <Link className="small" to="/updates">
+          All updates
+        </Link>
+      </div>
       {updates.data?.running === true ? (
         <p className="muted small">
           <LoaderCircle className="spin" size={14} /> Checking…
@@ -307,29 +314,75 @@ function UpdatesCard({ apps }: { apps: App[] }): React.ReactNode {
   );
 }
 
-function StorageCard(): React.ReactNode {
-  const overview = useOverview();
-  const disks = overview.data?.host.disks ?? [];
+type FigureProps = { children?: React.ReactNode; label: string; to: string; value: React.ReactNode };
+
+/** One figure in the strip at the top of Home; each leads to the page with the detail. */
+function Figure({ children, label, to, value }: FigureProps): React.ReactNode {
   return (
-    <section aria-labelledby="storage-title" className="card">
-      <div className={styles['sectionHead']}>
-        <h3 id="storage-title">Storage</h3>
-        <span className="spacer" />
-        <Link className="small" to="/system">
-          Details
-        </Link>
-      </div>
-      <ul className={styles['plain']}>
-        {disks.map((disk) => (
-          <li key={disk.path}>
-            <div className={styles['diskLine']}>
-              <code>{(disk.paths ?? [disk.path]).join(' · ')}</code>
-              <span className="muted small">{formatBytes(disk.free)} free</span>
-            </div>
-            <Meter percent={disk.percent} />
-          </li>
-        ))}
-      </ul>
+    <Link className={styles['figure']} to={to}>
+      <span className={styles['figureLabel']}>{label}</span>
+      <span className={styles['figureValue']}>{value}</span>
+      {children}
+    </Link>
+  );
+}
+
+/** The server at a glance: how long it has been up, and how full its CPU, memory and disks are. */
+function ServerStrip(): React.ReactNode {
+  const overview = useOverview();
+  const resources = useResources();
+  const host = resources.data?.host;
+  const data = overview.data;
+  // The pool the media lives on is the biggest disk; that is the one that fills up.
+  const disk = [...(data?.host.disks ?? [])].sort((a, b) => b.total - a.total)[0];
+  const cpu = host?.load_percent ?? null;
+  const memory = host?.memory_percent ?? null;
+  return (
+    <section aria-label="Server at a glance" className={styles['strip']}>
+      <Figure
+        label="Server"
+        to="/health"
+        value={host?.uptime == null ? '…' : `Up ${formatUptime(host.uptime).split(',')[0] ?? ''}`}
+      >
+        <span className={styles['figureSub']}>
+          {data?.containers.available === true
+            ? `${data.containers.running} of ${data.containers.total} containers running`
+            : 'Container status unavailable'}
+        </span>
+      </Figure>
+      <Figure label="CPU" to="/health" value={cpu === null ? '…' : `${Math.round(cpu)}%`}>
+        {cpu === null ? null : <Meter label={`CPU ${Math.round(cpu)}% busy`} percent={Math.round(cpu)} />}
+      </Figure>
+      <Figure
+        label="Memory"
+        to="/health"
+        value={
+          host === undefined ? (
+            '…'
+          ) : (
+            <>
+              {formatBytes(host.memory_used)} <small>/ {formatBytes(host.memory_total)}</small>
+            </>
+          )
+        }
+      >
+        {memory === null ? null : <Meter label={`Memory ${Math.round(memory)}% used`} percent={Math.round(memory)} />}
+      </Figure>
+      <Figure
+        label="Storage"
+        to="/storage"
+        value={
+          disk === undefined ? (
+            '…'
+          ) : (
+            <>
+              {disk.percent}% <small>of {formatBytes(disk.total)}</small>
+            </>
+          )
+        }
+      >
+        {disk === undefined ? null : <Meter label={`${disk.path} ${disk.percent}% used`} percent={disk.percent} />}
+      </Figure>
     </section>
   );
 }
@@ -338,7 +391,7 @@ function ActivityCard({ jobs }: { jobs: Job[] }): React.ReactNode {
   return (
     <section aria-labelledby="activity-title" className="card">
       <div className={styles['sectionHead']}>
-        <h3 id="activity-title">Recent activity</h3>
+        <h2 id="activity-title">Recent activity</h2>
         <span className="spacer" />
         <Link className="small" to="/activity">
           All
@@ -396,7 +449,6 @@ export function HomePage(): React.ReactNode {
     ...selfAttention(self.data),
   ];
   const urgent = attention.filter((item) => item.tone !== 'info').length;
-  const running = data.containers.running;
   return (
     <div className="stack">
       <header className={styles['hero']}>
@@ -410,13 +462,13 @@ export function HomePage(): React.ReactNode {
               : 'Everything is running'}
           </h1>
           <p className="muted">
-            {data.containers.available
-              ? `${running} of ${data.containers.total} containers running` +
-                (apps.data === undefined ? '' : ` · ${installed.length} apps installed`)
-              : 'Container status unavailable'}
+            {apps.data === undefined ? 'Reading your apps…' : `${installed.length} apps installed`}
+            {urgent > 0 ? ' · the most pressing first' : ''}
           </p>
         </div>
       </header>
+
+      <ServerStrip />
 
       {attention.length === 0 ? null : (
         <section aria-label="Needs attention" className="card">
@@ -430,7 +482,6 @@ export function HomePage(): React.ReactNode {
         <Launcher apps={installed} />
         <aside className={styles['rail']}>
           <UpdatesCard apps={installed} />
-          <StorageCard />
           <ActivityCard jobs={data.jobs.recent} />
         </aside>
       </div>

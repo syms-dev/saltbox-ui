@@ -128,7 +128,7 @@ export function attentionItems(data: Overview, apps: App[] = []): Attention[] {
   for (const disk of data.host.disks) {
     if (disk.percent >= DISK_WARN_PERCENT) {
       items.push({
-        actions: [{ kind: 'link', label: 'Storage', to: '/system' }],
+        actions: [{ kind: 'link', label: 'Storage', to: '/storage' }],
         detail: `${formatBytes(disk.free)} free of ${formatBytes(disk.total)}`,
         id: `disk:${disk.path}`,
         title: `${disk.path} is ${disk.percent}% full`,

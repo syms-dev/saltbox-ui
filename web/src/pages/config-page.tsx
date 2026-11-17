@@ -205,7 +205,7 @@ export function ConfigPage(): React.ReactNode {
   return (
     <div className="stack">
       <div className="row">
-        <h1 className={styles['flush']}>Config</h1>
+        <h1 className={styles['flush']}>Config files</h1>
         <span className="spacer" />
         <span className={`small ${total > 0 ? styles['error'] : 'muted'}`}>
           {total === 0 ? 'No validation errors' : `${total} error${total === 1 ? '' : 's'} across all files`}

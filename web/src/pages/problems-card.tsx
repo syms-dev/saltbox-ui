@@ -44,7 +44,7 @@ export function problemAttention(problems: LogProblems | undefined): Attention[]
   return findings(problems)
     .filter((finding) => finding.group.rule?.severity === 'problem' && isOpen(finding.group))
     .map((finding) => ({
-      actions: [{ kind: 'link' as const, label: 'How to fix it', to: '/system#problems' }],
+      actions: [{ kind: 'link' as const, label: 'How to fix it', to: '/health#problems' }],
       detail: `${finding.app} logged it ${times(finding.group.count)} in the last day.`,
       id: finding.group.key,
       title: finding.group.rule?.title ?? finding.app,

@@ -81,7 +81,7 @@ describe('drive helpers', () => {
     expect(driveAttention({ drives: [drive()], error: '', installed: true })).toEqual([]);
     const [item] = driveAttention({ drives: [FAILING, drive()], error: '', installed: true });
     expect(item).toMatchObject({
-      actions: [{ kind: 'link', label: 'Drive health', to: '/system#drives' }],
+      actions: [{ kind: 'link', label: 'Drive health', to: '/health#drives' }],
       id: 'drive:wwn-b',
       title: 'Drive /dev/sdb is failing its health check',
       tone: 'danger',

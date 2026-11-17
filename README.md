@@ -41,6 +41,15 @@ after a reboot or a dropped SSH session.
 
 It runs at `https://saltbox.<your domain>`, behind Traefik and Authelia.
 
+The menu is grouped the way you look for things: Home, Updates and Activity;
+Apps (Installed, Discover); Media (Library, Connect apps); Server (Health,
+Storage, Network & access, Backups, Automation); and Settings (Config files).
+Updates and Health show a count when something is waiting. On a phone the
+bottom bar holds Home, Apps, Updates and Activity, and More opens every page.
+Ctrl K (⌘K on a Mac) or `/` searches apps, pages and actions from anywhere.
+The look is dark or light to match your device, set in Inter and JetBrains
+Mono; both fonts ship with the app, so the page loads nothing from elsewhere.
+
 Home starts with whatever needs you, each item with the button that fixes it:
 restart an unhealthy app, start a stopped one, apply updates, open a config
 file with errors, retry a failed job, start the VPN, or restart the server
@@ -48,7 +57,15 @@ when Ubuntu's updates need it (it tells you which package asked). Below that
 is media at a glance: the VPN (public IP, forwarded port, what goes through
 it), downloads in qBittorrent and SABnzbd (and how much is still seeding after
 it finished), what's playing on Plex, and what Sonarr and Radarr expect this
-week. Then a launcher for your apps, and updates, storage and activity.
+week. Above it, the server at a glance: uptime, CPU, memory and storage, each
+a link to the page with the detail. Then a launcher for your apps, updates and
+recent activity.
+
+Updates gathers everything that can be updated: apps with a newer image (with
+the version change and, for apps whose releases are on GitHub, their release
+notes on the app's page), Saltbox's own version with `sb update`, and Saltbox
+UI itself. `sb update` shows its announcements alongside the job and waits for
+your yes or no before running migrations.
 
 Apps lists what's installed, with health, update and restart buttons, and a
 Discover tab for installing anything in the Saltbox and Sandbox catalogs.
@@ -64,16 +81,15 @@ links.
 Activity shows every job with a live log. A failed job says which task failed
 and why, and you can run it again.
 
-System shows CPU and memory, with every container sortable by name, CPU or
-memory, and each drive and pool once. With Scrutiny installed you also get
+Health shows CPU and memory, with every container sortable by name, CPU or
+memory, and Saltbox's systemd services. With Scrutiny installed you also get
 every drive's health, temperature and age, and for a failing drive, which
-attribute it fails on (that one also goes to the top of Home). There are
-mounts and Saltbox services, Tailscale (including opening this app over it),
-backups (`sb install backup` on demand), and Saltbox's own version with
-`sb update`. That update shows its announcements alongside the job and waits
-for your yes or no before running migrations.
+attribute it fails on (that one also goes to the top of Home). Storage shows
+each drive and pool once, with its free space, and what is mounted. Network &
+access is Tailscale, including opening this app over it. Backups runs
+`sb install backup` on demand.
 
-System also lists errors that keep coming back in the apps' logs, one card
+Health also lists errors that keep coming back in the apps' logs, one card
 each. Known ones come with what they mean and advice that depends on whether
 the server has cloud storage, plus a fix button where the fix is safe. You can
 mark an issue fixed, which hides it until the app logs it again (then it comes
@@ -121,13 +137,13 @@ to, and after a boot shows the containers coming back.
 
 ## Status: what has and hasn't been checked
 
-Version 0.2.8. Treat it as a beta.
+Version 0.3.0. Treat it as a beta.
 
 | Check | Result |
 | --- | --- |
 | Python tests (pytest) | 437 tests; pass on Python 3.12 and 3.14 |
-| Web unit tests (Vitest) | 103 tests pass |
-| End-to-end tests (Playwright, Chromium) | 69 tests pass: every flow on desktop, every page at phone and tablet width, failing on any console error |
+| Web unit tests (Vitest) | 105 tests pass |
+| End-to-end tests (Playwright, Chromium) | 78 tests pass: every flow on desktop, every page at phone and tablet width, failing on any console error |
 | Package | CI builds the wheel, installs it in a clean environment and loads the web app from it |
 | Real servers | **One**: Ubuntu 26.04, Python 3.14, local drives pooled with mergerfs, Plex, qBittorrent behind Gluetun (ProtonVPN) |
 
@@ -204,7 +220,7 @@ Install the wheel from this repository's Releases page with pipx:
 
 ```
 sudo apt install -y pipx
-V=0.2.8
+V=0.3.0
 sudo PIPX_HOME=/usr/local/pipx PIPX_BIN_DIR=/usr/local/bin pipx install \
   "https://github.com/syms-dev/saltbox-ui/releases/download/v$V/saltbox_ui-$V-py3-none-any.whl"
 ```
@@ -232,12 +248,12 @@ That writes a Traefik route (`/opt/traefik/saltbox-ui.yml`) and a systemd unit
 (`saltbox-ui.service`), then starts it. The app answers at
 `https://saltbox.<your domain>` once Traefik has a certificate.
 
-To update, use the button on the System page when it says a newer Saltbox UI
-is out. It installs the newest release wheel (or does a `git pull` and rebuild
+To update, use the button on the Updates page (or the arrow beside the version
+at the foot of the menu) when it says a newer Saltbox UI is out. It installs the newest release wheel (or does a `git pull` and rebuild
 when running from a source checkout) and restarts the daemon, and the page
 reloads itself on the new version. By hand, install the newer wheel with
 `pipx install --force` and run `sudo systemctl restart saltbox-ui`. Saltbox
-itself still updates with `sb update`, from the terminal or the System page.
+itself still updates with `sb update`, from the terminal or the Updates page.
 
 To remove it, `sudo sbx daemon disable` stops the service and removes its
 systemd unit, Traefik route, the VPN port-sync timer and the Tailscale address.
@@ -475,3 +491,8 @@ The app icons in `web/public/icons` come from
 [dashboard-icons](https://github.com/homarr-labs/dashboard-icons) (Apache-2.0,
 license alongside them), resized by `scripts/build_icons.py`. Each logo is a
 trademark of its own project and is used only to show which app is which.
+
+The fonts in `web/public/fonts` are [Inter](https://github.com/rsms/inter) and
+[JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), both under the SIL
+Open Font License 1.1 (license texts alongside them), taken as the Latin and
+Latin Extended variable WOFF2 subsets published by Fontsource.

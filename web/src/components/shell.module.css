@@ -36,23 +36,38 @@
   text-decoration: none;
 }
 
-/* The mark: a salt crystal, drawn in CSS so it follows the theme. */
+/* The mark: a terminal prompt in a square, drawn in CSS so it follows the theme. */
 .mark {
-  background: linear-gradient(135deg, var(--color-accent), color-mix(in srgb, var(--color-accent) 55%, #7fe3d6));
-  border-radius: 0.4rem;
+  background: var(--color-accent);
+  border-radius: var(--radius-sm);
   flex: none;
   height: 1.75rem;
   position: relative;
-  transform: rotate(45deg) scale(0.82);
   width: 1.75rem;
 }
 
+.mark::before,
 .mark::after {
-  border: 2px solid var(--color-surface);
-  border-radius: 0.2rem;
+  background: var(--color-accent-fg);
   content: '';
-  inset: 0.42rem;
   position: absolute;
+}
+
+/* ">" */
+.mark::before {
+  clip-path: polygon(0 0, 100% 50%, 0 100%, 0 70%, 55% 50%, 0 30%);
+  height: 0.7rem;
+  left: 0.42rem;
+  top: 0.52rem;
+  width: 0.45rem;
+}
+
+/* "_" */
+.mark::after {
+  height: 2px;
+  left: 0.95rem;
+  top: 1.1rem;
+  width: 0.45rem;
 }
 
 .brandText {
@@ -62,6 +77,7 @@
 }
 
 .brandName {
+  font-family: var(--font-head);
   font-size: var(--text-md);
   font-weight: 700;
   overflow: hidden;
@@ -93,7 +109,24 @@
 
 .nav {
   display: grid;
-  gap: 2px;
+  gap: var(--space-3);
+  min-height: 0;
+  margin: 0 calc(-1 * var(--space-3));
+  overflow-y: auto;
+  /* The menu scrolls inside the sidebar on short screens; the version stays at the foot. */
+  padding: 0 var(--space-3);
+}
+
+.group {
+  display: grid;
+  gap: 1px;
+}
+
+.groupTitle {
+  color: var(--color-fg-muted);
+  font-size: 0.6875rem;
+  margin: 0 0 var(--space-1);
+  padding: 0 var(--space-3);
 }
 
 .navLink {
@@ -101,10 +134,16 @@
   border-radius: var(--radius-sm);
   color: var(--color-fg-muted);
   display: flex;
-  font-size: var(--text-md);
-  font-weight: 550;
+  font-size: var(--text-sm);
+  font-weight: 500;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  min-height: 2.125rem;
+  padding: var(--space-1) var(--space-3);
+  position: relative;
+}
+
+.navLink svg {
+  flex: none;
 }
 
 .navLink:hover {
@@ -116,7 +155,24 @@
 /* :hover sticks after a tap on touch screens, so the active style must win over it */
 .navLink.active,
 .navLink.active:hover {
-  background: var(--color-accent-soft);
+  background: var(--color-surface-2);
+  color: var(--color-fg);
+  font-weight: 600;
+}
+
+/* The current page carries a bar in the accent, like a cursor in a terminal. */
+.navLink.active::before {
+  background: var(--color-accent);
+  border-radius: 1px;
+  bottom: 0.4rem;
+  content: '';
+  left: 0;
+  position: absolute;
+  top: 0.4rem;
+  width: 2px;
+}
+
+.navLink.active svg {
   color: var(--color-accent);
 }
 
@@ -124,6 +180,7 @@
   background: var(--color-warn-soft);
   border-radius: var(--radius-full);
   color: var(--color-warn);
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
   font-weight: 700;
   margin-left: auto;
@@ -156,6 +213,11 @@
   min-width: 0;
   overflow-wrap: break-word;
   padding: var(--space-6) var(--space-8) var(--space-10);
+}
+
+/* Focus moves here after each page change, for screen readers; no ring is drawn for it. */
+.main:focus {
+  outline: none;
 }
 
 .content {
@@ -238,6 +300,10 @@
     padding: var(--space-4) var(--space-4) calc(var(--tabbar-height) + var(--space-8) + env(safe-area-inset-bottom));
   }
 
+  .tab {
+    position: relative;
+  }
+
   .tabbar {
     background: color-mix(in srgb, var(--color-surface) 96%, transparent);
     backdrop-filter: blur(8px);
@@ -254,6 +320,9 @@
 
   .tab {
     align-items: center;
+    background: none;
+    border: 0;
+    border-radius: 0;
     color: var(--color-fg-muted);
     display: flex;
     flex-direction: column;
@@ -262,14 +331,28 @@
     gap: 2px;
     height: var(--tabbar-height);
     justify-content: center;
+    min-height: 0;
+    padding: 0;
   }
 
-  .tab:hover {
+  .tab:hover,
+  .tab:hover:not(:disabled) {
+    background: none;
     text-decoration: none;
   }
 
   .tab.active {
     color: var(--color-accent);
+  }
+
+  .tab.active::before {
+    background: var(--color-accent);
+    content: '';
+    height: 2px;
+    left: 30%;
+    position: absolute;
+    right: 30%;
+    top: 0;
   }
 }
 
@@ -303,4 +386,80 @@
   border-radius: var(--radius-full);
   font-variant-numeric: tabular-nums;
   padding: 0 var(--space-2);
+}
+
+.tabIcon {
+  display: inline-flex;
+  position: relative;
+}
+
+/* Something is waiting behind this tab: updates, or apps that are down. */
+.tabDot {
+  background: var(--color-warn);
+  border: 2px solid var(--color-surface);
+  border-radius: 50%;
+  height: 0.625rem;
+  position: absolute;
+  right: -0.3rem;
+  top: -0.15rem;
+  width: 0.625rem;
+}
+
+.tabDotDanger {
+  background: var(--color-danger);
+}
+
+/* -- the More sheet (phones): every page ------------------------------------------------- */
+.sheet {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  bottom: 0;
+  box-shadow: var(--shadow-lg);
+  color: var(--color-fg);
+  inset: auto 0 0;
+  margin: 0;
+  max-height: 85dvh;
+  max-width: none;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4) calc(var(--space-6) + env(safe-area-inset-bottom));
+  position: fixed;
+  width: 100%;
+}
+
+.sheet::backdrop {
+  background: var(--color-overlay);
+}
+
+.sheetHead {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.sheetTitle {
+  margin: 0;
+}
+
+.sheetNav {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.sheetNav .navLink {
+  font-size: var(--text-md);
+  min-height: 2.75rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sheet[open] {
+    animation: sheet-in var(--motion-med) ease-out;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateY(16px);
+  }
 }

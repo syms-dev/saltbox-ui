@@ -81,7 +81,7 @@ describe('problemAttention', () => {
     expect(problemAttention(undefined)).toEqual([]);
     expect(problemAttention(problems())).toEqual([
       {
-        actions: [{ kind: 'link', label: 'How to fix it', to: '/system#problems' }],
+        actions: [{ kind: 'link', label: 'How to fix it', to: '/health#problems' }],
         detail: 'Autoscan logged it 48 times in the last day.',
         id: 'log:autoscan:autoscan-anchor',
         title: 'Autoscan is holding back every scan',

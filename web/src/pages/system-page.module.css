@@ -193,3 +193,8 @@
 .sort:hover {
   color: var(--color-fg);
 }
+
+.head {
+  display: grid;
+  gap: var(--space-1);
+}

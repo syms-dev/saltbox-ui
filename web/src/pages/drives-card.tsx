@@ -60,7 +60,7 @@ export function driveAttention(health: DriveHealth | undefined): Attention[] {
   return (health?.drives ?? [])
     .filter((drive) => !drive.healthy && drive.dismissed !== true)
     .map((drive) => ({
-      actions: [{ kind: 'link' as const, label: 'Drive health', to: '/system#drives' }],
+      actions: [{ kind: 'link' as const, label: 'Drive health', to: '/health#drives' }],
       detail: `${describe(drive)}. ${failingSummary(drive)}. Back up what is on it and plan to replace it.`,
       id: `drive:${drive.id}`,
       title: `Drive ${drive.name} is failing its health check`,

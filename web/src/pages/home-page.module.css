@@ -5,7 +5,7 @@
 }
 
 .heroTitle {
-  font-size: var(--text-2xl);
+  font-size: var(--text-xl);
   margin-bottom: var(--space-1);
 }
 
@@ -253,4 +253,79 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* -- the server at a glance ------------------------------------------------------------ */
+.strip {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.figure {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  color: var(--color-fg);
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  transition: border-color var(--motion-fast);
+}
+
+.figure:hover {
+  border-color: var(--color-border-strong);
+  text-decoration: none;
+}
+
+.figureLabel {
+  color: var(--color-fg-muted);
+  font-family: var(--font-head);
+  font-size: var(--label-size);
+  font-weight: 600;
+  letter-spacing: var(--label-track);
+  text-transform: uppercase;
+}
+
+.figureValue {
+  font-family: var(--font-head);
+  font-size: var(--text-xl);
+  font-variant-numeric: tabular-nums;
+  font-weight: 550;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.figureValue small {
+  color: var(--color-fg-muted);
+  font-size: var(--text-sm);
+  font-weight: 450;
+}
+
+.figureSub {
+  color: var(--color-fg-muted);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 63.99rem) {
+  .strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 40rem) {
+  .figure {
+    padding: var(--space-3);
+  }
+
+  .figureValue {
+    font-size: var(--text-lg);
+    white-space: normal;
+  }
+
+  /* "/ 15.7 GiB" goes under the figure rather than off the edge. */
+  .figureValue small {
+    display: block;
+  }
 }

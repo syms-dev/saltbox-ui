@@ -579,10 +579,10 @@ class DaemonGuard:
 
 MAX_BODY_BYTES = 2 * 1024 * 1024  # the largest thing sent here is a config file
 
-# Nothing is loaded from outside the server: app icons are bundled (scripts/build_icons.py),
-# so no image request leaves this origin, carries the sign-on cookie to an app, or can be
-# used to send data out. React sets inline styles through the DOM, which a style-src without
-# 'unsafe-inline' allows.
+# Nothing is loaded from outside the server: app icons (scripts/build_icons.py) and fonts
+# are bundled, so no image request leaves this origin, carries the sign-on cookie to an app,
+# or can be used to send data out. React sets inline styles through the DOM, which a
+# style-src without 'unsafe-inline' allows.
 CONTENT_SECURITY_POLICY = "; ".join(
     [
         "default-src 'self'",
