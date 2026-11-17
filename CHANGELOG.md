@@ -3,6 +3,18 @@
 Notable changes to Saltbox UI. Versions match the GitHub releases; dates are UTC.
 This file is kept by hand so the history reads the way the work actually went.
 
+## [0.3.1] — 2026-11-17
+
+### Fixed
+
+- **CPU shows how busy the CPUs are.** Home and Health showed the load average
+  per core as "CPU", which read 100% on a server that was mostly idle. The load
+  average also counts processes waiting on disks and network mounts (rclone,
+  mergerfs, a slow or failing drive), so it can sit far above the core count
+  while the CPUs do little. CPU is now measured from `/proc/stat` between two
+  readings; the time spent waiting on disks is shown beside it (on Home when it
+  passes 10%), and the load average stays on Health for reference.
+
 ## [0.3.0] — 2026-11-17
 
 A redesign: a new look, and a menu built around where people look for things.
