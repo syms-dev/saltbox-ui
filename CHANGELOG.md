@@ -3,6 +3,15 @@
 Notable changes to Saltbox UI. Versions match the GitHub releases; dates are UTC.
 This file is kept by hand so the history reads the way the work actually went.
 
+## [0.2.7] — 2026-11-17
+
+### Added
+
+- **A newer Saltbox UI shows in the sidebar.** When an update is available, a
+  small arrow appears beside the version in the bottom left on every page.
+  Hovering says what is available; clicking it opens the update on the System
+  page.
+
 ## [0.2.6] — 2026-11-17
 
 ### Changed

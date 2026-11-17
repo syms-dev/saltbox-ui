@@ -121,7 +121,7 @@ to, and after a boot shows the containers coming back.
 
 ## Status: what has and hasn't been checked
 
-Version 0.2.6. Treat it as a beta.
+Version 0.2.7. Treat it as a beta.
 
 | Check | Result |
 | --- | --- |
@@ -204,7 +204,7 @@ Install the wheel from this repository's Releases page with pipx:
 
 ```
 sudo apt install -y pipx
-V=0.2.6
+V=0.2.7
 sudo PIPX_HOME=/usr/local/pipx PIPX_BIN_DIR=/usr/local/bin pipx install \
   "https://github.com/syms-dev/saltbox-ui/releases/download/v$V/saltbox_ui-$V-py3-none-any.whl"
 ```
