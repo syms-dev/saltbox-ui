@@ -714,7 +714,9 @@ def test_a_bazarr_config_with_merge_keys_is_refused(tmp_path: Path) -> None:
     cfg = tmp_path / "bazarr" / "config"
     cfg.mkdir(parents=True)
     bomb = (
-        "g: &b {" + ", ".join(f"k{i}: 1" for i in range(20_000)) + "}\n"
+        "g: &b {"
+        + ", ".join(f"k{i}: 1" for i in range(20_000))
+        + "}\n"
         + "".join(f"m{i}: {{<<: *b}}\n" for i in range(2_000))
     )
     (cfg / "config.yaml").write_text(bomb)

@@ -315,11 +315,10 @@ class SessionVerifier:
         return identity
 
     def _ask(self, cookie: str, forwarded: dict[str, str]) -> tuple[str, str] | None:
-        fetch = self._fetch
-        if fetch is None:
-            from ..appsetup.http import fetch as fetch  # noqa: PLC0415
-        from ..appsetup.http import SetupError  # noqa: PLC0415
+        from ..appsetup.http import SetupError
+        from ..appsetup.http import fetch as default_fetch
 
+        fetch = self._fetch or default_fetch
         addresses = sorted(self.addresses(self.container))
         if not addresses:
             raise VerifyUnavailable(

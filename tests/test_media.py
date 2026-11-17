@@ -236,4 +236,5 @@ def test_a_non_finite_number_from_an_app_parses_as_no_answer() -> None:
     assert Response(200, b'{"progress": NaN}').json() is None
     assert Response(200, b'{"x": Infinity}').json() is None
     assert Response(200, b'{"x": 1e999}').json() is None
-    assert Response(200, b'{"progress": 0.5, "name": "ok"}').json() == {"progress": 0.5, "name": "ok"}
+    good = Response(200, b'{"progress": 0.5, "name": "ok"}').json()
+    assert good == {"progress": 0.5, "name": "ok"}

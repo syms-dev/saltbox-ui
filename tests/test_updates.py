@@ -526,6 +526,8 @@ def test_a_non_dict_token_answer_is_handled_not_crashed() -> None:
     from saltbox_ui.appsetup.http import Response, SetupError
     from saltbox_ui.state.updates import ImageRef, Registry
 
-    reg = Registry(transport=lambda method, url, headers, body: Response(200, b'["not","a","dict"]'))
+    reg = Registry(
+        transport=lambda method, url, headers, body: Response(200, b'["not","a","dict"]')
+    )
     with pytest.raises(SetupError):  # treated as "no token", never an AttributeError
         reg._token('Bearer realm="https://auth.example.com/token"', ImageRef("reg", "repo", "tag"))

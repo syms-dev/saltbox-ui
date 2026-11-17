@@ -14,8 +14,8 @@ timer re-runs ``sbx setup sync-port`` every few minutes.
 
 from __future__ import annotations
 
-import re
 import contextlib
+import re
 import shutil
 import subprocess
 import sys

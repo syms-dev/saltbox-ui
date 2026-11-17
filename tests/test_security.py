@@ -974,8 +974,8 @@ def test_a_container_label_router_cannot_forge_the_admin(scratch_layout: Layout)
 def test_the_session_is_confirmed_with_the_sign_on() -> None:
     """SessionVerifier asks the provider, with the request cookie, who is signed in, and
     believes only its answer; it caches a positive, and fails closed when it is unreachable."""
-    from saltbox_ui.daemon.app import SessionVerifier, VerifyUnavailable
     from saltbox_ui.appsetup.http import Response, SetupError
+    from saltbox_ui.daemon.app import SessionVerifier, VerifyUnavailable
 
     calls: list[tuple[str, dict[str, str]]] = []
 
@@ -988,8 +988,11 @@ def test_the_session_is_confirmed_with_the_sign_on() -> None:
         return Response(200, headers={"remote-user": "seed", "remote-groups": "admins,users"})
 
     verify = SessionVerifier(
-        "authelia", "remote-user", "remote-groups",
-        addresses=lambda name: {"172.19.0.5"}, fetch=fetch,
+        "authelia",
+        "remote-user",
+        "remote-groups",
+        addresses=lambda name: {"172.19.0.5"},
+        fetch=fetch,
     )
     fwd = {"X-Forwarded-Host": "saltbox.example.com"}
     assert verify("authelia_session=good", fwd) == ("seed", "admins,users")
@@ -1002,7 +1005,9 @@ def test_the_session_is_confirmed_with_the_sign_on() -> None:
     assert verify("authelia_session=good", fwd) == ("seed", "admins,users")
     assert len(calls) == before
     # no address for the provider, or it cannot be reached: fail closed
-    unresolved = SessionVerifier("authelia", "remote-user", "remote-groups", addresses=lambda n: set())
+    unresolved = SessionVerifier(
+        "authelia", "remote-user", "remote-groups", addresses=lambda n: set()
+    )
     with pytest.raises(VerifyUnavailable):
         unresolved("authelia_session=good", fwd)
 

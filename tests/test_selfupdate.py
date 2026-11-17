@@ -363,7 +363,9 @@ def test_a_source_update_that_fails_is_finished_by_the_next_run(
     push_change(work, "pyproject.toml", "[project]\nname = 'saltbox-ui'\nversion = '2'\n")
 
     real = selfupdate.step
-    monkeypatch.setattr(selfupdate, "step", lambda args, **o: 1 if "pip" in args else real(args, **o))
+    monkeypatch.setattr(
+        selfupdate, "step", lambda args, **o: 1 if "pip" in args else real(args, **o)
+    )
     assert selfupdate.update_source(source) == 1
     assert selfupdate.source_update_unfinished() is True
     assert selfupdate.status(package=source / "saltbox_ui", fetch=lambda url: [])[
