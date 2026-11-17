@@ -243,7 +243,8 @@ function Discover({ apps }: { apps: App[] }): React.ReactNode {
   const [group, setGroup] = useState<string>('popular');
   const [sub, setSub] = useState('');
   const [source, setSource] = useState<Source>('all');
-  const [hideInstalled, setHideInstalled] = useState(false);
+  // Discover is for finding something new: installed apps stay out unless asked for (or searched).
+  const [hideInstalled, setHideInstalled] = useState(true);
   const jobs = useJobActions();
   const busy = useJobs().data?.busy ?? false;
 
@@ -259,7 +260,7 @@ function Discover({ apps }: { apps: App[] }): React.ReactNode {
     .filter((app) => (searching ? true : inGroup(app, group)))
     .filter((app) => sub === '' || subcategory(app) === sub)
     .filter((app) => source === 'all' || app.repo === source)
-    .filter((app) => !hideInstalled || !app.installed)
+    .filter((app) => searching || !hideInstalled || !app.installed)
     .filter((app) => matchesText(app, needle))
     .sort((a, b) =>
       group === 'popular' && !searching

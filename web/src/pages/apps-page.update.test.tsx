@@ -96,3 +96,20 @@ describe('discover', () => {
     expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({ kind: 'install', tags: ['sonarr'] });
   });
 });
+
+describe('discover hides what is installed', () => {
+  it('leaves installed apps out by default, and a search still finds them', async () => {
+    stubApi({
+      '/apps': [
+        makeApp({ installed: true, role: 'sonarr', title: 'Sonarr' }),
+        makeApp({ installed: false, role: 'jellyfin', title: 'Jellyfin' }),
+      ],
+      '/jobs': { busy: false, current: null, jobs: [], lock: null },
+    });
+    renderAt(<AppsPage tab="discover" />, '/apps/discover');
+    expect(await screen.findByRole('link', { name: 'Jellyfin' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Sonarr' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Search the catalog'), { target: { value: 'sonarr' } });
+    expect(await screen.findByRole('link', { name: 'Sonarr' })).toBeInTheDocument();
+  });
+});

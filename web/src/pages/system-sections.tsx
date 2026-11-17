@@ -157,15 +157,20 @@ export function ResourcesCard(): React.ReactNode {
 }
 
 function TailscaleAccess({
+  dnsName,
   owner,
   serve,
 }: {
+  dnsName: string | undefined;
   owner: string;
   serve: { enabled: boolean; error?: string; url?: string };
 }): React.ReactNode {
   const toggle = useTailscaleServe();
   const confirm = useConfirm();
   const toast = useToast();
+  // Where `tailscale serve` puts it: the MagicDNS name (without its trailing dot), port 8443.
+  const host = (dnsName ?? '').replace(/\.$/, '');
+  const planned = host === '' ? null : `https://${host}:8443/`;
 
   async function turnOn(): Promise<void> {
     const ok = await confirm({
@@ -194,11 +199,11 @@ function TailscaleAccess({
       {serve.enabled ? (
         <>
           <span className="small">
-            On at{' '}
+            Open{' '}
             <a href={serve.url} rel="noreferrer" target="_blank">
               {serve.url}
             </a>{' '}
-            for {owner} only.
+            in a browser on any of your devices signed in to Tailscale as {owner}.
           </span>
           <div className="row">
             <button
@@ -218,8 +223,14 @@ function TailscaleAccess({
       ) : (
         <>
           <span className="muted small">
-            Reach this app from your own devices on the tailnet, without your domain or Authelia. A way back in when
+            Open this web app from your own devices on the tailnet, without your domain or Authelia: a way back in when
             something breaks.
+            {planned === null ? null : (
+              <>
+                {' '}
+                Once on, it is at <code>{planned}</code>.
+              </>
+            )}
           </span>
           <div className="row">
             <button className="small primary" disabled={toggle.isPending} onClick={() => void turnOn()} type="button">
@@ -273,13 +284,22 @@ export function TailscaleCard(): React.ReactNode {
               {data.peers_online} of {data.peers} other devices online
             </dd>
           </dl>
-          {data.serve === undefined ? null : <TailscaleAccess owner={data.owner ?? ''} serve={data.serve} />}
-          <p className={`note small ${styles['tip']}`}>
-            <Terminal aria-hidden="true" size={14} /> From any of your devices:{' '}
-            <code>
-              ssh {meta.data?.user ?? '<user>'}@{data.magic_dns === true ? data.hostname : (data.addresses?.[0] ?? '')}
-            </code>
-          </p>
+          {data.serve === undefined ? null : (
+            <TailscaleAccess dnsName={data.dns_name} owner={data.owner ?? ''} serve={data.serve} />
+          )}
+          <div className={`${styles['access']} stack-sm`}>
+            <strong>Server terminal over Tailscale</strong>
+            <span className="muted small">
+              To log in to the server itself (a shell, not this web app), from a terminal on any of your devices:
+            </span>
+            <p className={`note small ${styles['tip']}`}>
+              <Terminal aria-hidden="true" size={14} />{' '}
+              <code>
+                ssh {meta.data?.user ?? '<user>'}@
+                {data.magic_dns === true ? data.hostname : (data.addresses?.[0] ?? '')}
+              </code>
+            </p>
+          </div>
         </div>
       )}
     </section>
