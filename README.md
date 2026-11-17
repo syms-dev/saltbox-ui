@@ -121,11 +121,11 @@ to, and after a boot shows the containers coming back.
 
 ## Status: what has and hasn't been checked
 
-Version 0.2.2. Treat it as a beta.
+Version 0.2.3. Treat it as a beta.
 
 | Check | Result |
 | --- | --- |
-| Python tests (pytest) | 385 tests; pass on Python 3.12 and 3.14 |
+| Python tests (pytest) | 402 tests; pass on Python 3.12 and 3.14 |
 | Web unit tests (Vitest) | 95 tests pass |
 | End-to-end tests (Playwright, Chromium) | 66 tests pass: every flow on desktop, every page at phone and tablet width, failing on any console error |
 | Package | CI builds the wheel, installs it in a clean environment and loads the web app from it |
@@ -204,7 +204,7 @@ Install the wheel from this repository's Releases page with pipx:
 
 ```
 sudo apt install -y pipx
-V=0.2.2
+V=0.2.3
 sudo PIPX_HOME=/usr/local/pipx PIPX_BIN_DIR=/usr/local/bin pipx install \
   "https://github.com/syms-dev/saltbox-ui/releases/download/v$V/saltbox_ui-$V-py3-none-any.whl"
 ```
@@ -275,22 +275,27 @@ single sign-on, so a browser never holds it. That token isn't much of a
 secret, because Traefik shows its configuration, this header included, to
 every container on its network. So the daemon only accepts it on that address,
 only from the address Docker gave the Traefik container, and never without a
-signed-in admin. It doesn't work on 127.0.0.1. One gap remains: a container
-that can forge its address on the Docker network (containers have the
-`NET_RAW` capability unless it's dropped) could pass for Traefik. Closing that
-needs Traefik to prove itself with a client certificate, which this doesn't do
-yet.
+signed-in admin. It doesn't work on 127.0.0.1.
 
-Only the Saltbox admin gets in through Traefik. The daemon reads the
-`Remote-User` and `Remote-Groups` headers Authelia returns and lets in only the
-user from accounts.yml or a member of the `admins` group. Traefik replaces any
-copy of those two headers a client sends, and no other header is believed.
-Other single sign-on users are refused, and so is any request a bypass rule
-let through without signing in. If you use authentik instead, set
-`SALTBOX_UI_SSO=authentik` for both the daemon and `sbx daemon enable`, so the
-route and the daemon agree. `SALTBOX_UI_ADMIN_CHECK=off` turns the admin check
-off and `SALTBOX_UI_PROXY_PEER=off` accepts Traefik's token from any address.
-I don't recommend either.
+That still isn't enough on its own. A container can read the token out of
+Traefik, and a Traefik router an app defines in its own labels can reach the
+daemon's service and set the `Remote-User` and `Remote-Groups` headers itself,
+skipping single sign-on. So the daemon doesn't trust those headers. On a
+proxied request it takes the request's own session cookie to the sign-on's
+verify endpoint (Authelia, over the Docker network, never by name or DNS) and
+believes only the user it answers with. A label router, or a container that
+forges Traefik's address, cannot produce the admin's session cookie, so it
+cannot get in. Only the user from accounts.yml or a member of the `admins`
+group is let in; other single sign-on users are refused, and so is any request
+a bypass rule let through without signing in.
+
+If you use authentik instead, set `SALTBOX_UI_SSO=authentik` for both the
+daemon and `sbx daemon enable`. If the sign-on's container isn't named
+`authelia` or `authentik`, name it with `SALTBOX_UI_SSO_CONTAINER`.
+`SALTBOX_UI_VERIFY_SESSION=off` goes back to trusting the headers (only if the
+daemon can't reach the sign-on), `SALTBOX_UI_ADMIN_CHECK=off` turns the admin
+check off and `SALTBOX_UI_PROXY_PEER=off` accepts Traefik's token from any
+address. I don't recommend any of these.
 
 Over Tailscale (optional), `tailscale serve` proxies port 8443 of the server's
 tailnet address to one of the Unix sockets, and the daemon only lets in the
