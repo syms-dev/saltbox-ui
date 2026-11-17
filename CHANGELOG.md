@@ -3,6 +3,22 @@
 Notable changes to Saltbox UI. Versions match the GitHub releases; dates are UTC.
 This file is kept by hand so the history reads the way the work actually went.
 
+## [0.2.8] — 2026-11-17
+
+### Added
+
+- **Release notes for app updates.** An app with an update waiting has a
+  "What's new" card on its page, with the app's own release notes from GitHub
+  for every release between the version it runs and the one it would update to
+  (betas only when the update is to one). The newest is open; the others fold
+  away. It covers Sonarr, Radarr, Prowlarr, Lidarr, Bazarr, Overseerr,
+  Tautulli, SABnzbd, NZBGet, Jellyfin, Traefik, Authelia, Gluetun, Unpackerr
+  and Scrutiny. Other apps keep the version change and the releases link.
+- GitHub is asked only when someone opens an app that has an update, at most
+  once every six hours per app (15 minutes after a failure), without signing
+  in. The notes are shown as plain text, and only links to the app's own
+  GitHub release pages are kept.
+
 ## [0.2.7] — 2026-11-17
 
 ### Added

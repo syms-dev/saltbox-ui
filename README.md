@@ -121,13 +121,13 @@ to, and after a boot shows the containers coming back.
 
 ## Status: what has and hasn't been checked
 
-Version 0.2.7. Treat it as a beta.
+Version 0.2.8. Treat it as a beta.
 
 | Check | Result |
 | --- | --- |
-| Python tests (pytest) | 413 tests; pass on Python 3.12 and 3.14 |
-| Web unit tests (Vitest) | 100 tests pass |
-| End-to-end tests (Playwright, Chromium) | 68 tests pass: every flow on desktop, every page at phone and tablet width, failing on any console error |
+| Python tests (pytest) | 437 tests; pass on Python 3.12 and 3.14 |
+| Web unit tests (Vitest) | 103 tests pass |
+| End-to-end tests (Playwright, Chromium) | 69 tests pass: every flow on desktop, every page at phone and tablet width, failing on any console error |
 | Package | CI builds the wheel, installs it in a clean environment and loads the web app from it |
 | Real servers | **One**: Ubuntu 26.04, Python 3.14, local drives pooled with mergerfs, Plex, qBittorrent behind Gluetun (ProtonVPN) |
 
@@ -204,7 +204,7 @@ Install the wheel from this repository's Releases page with pipx:
 
 ```
 sudo apt install -y pipx
-V=0.2.7
+V=0.2.8
 sudo PIPX_HOME=/usr/local/pipx PIPX_BIN_DIR=/usr/local/bin pipx install \
   "https://github.com/syms-dev/saltbox-ui/releases/download/v$V/saltbox_ui-$V-py3-none-any.whl"
 ```
