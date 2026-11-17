@@ -90,12 +90,13 @@ export function ResourcesCard(): React.ReactNode {
         <div className={styles['gauges']}>
           <div>
             <div className={styles['gaugeHead']}>
-              <span>CPU load</span>
-              <strong>{host.load_percent ?? '–'}%</strong>
+              <span>CPU</span>
+              <strong>{host.cpu_percent == null ? '–' : `${host.cpu_percent}%`}</strong>
             </div>
-            <Meter label={`CPU load ${host.load_percent ?? 0}%`} percent={host.load_percent ?? 0} />
+            <Meter label={`CPU ${host.cpu_percent ?? 0}% busy`} percent={host.cpu_percent ?? 0} />
             <span className="muted small">
-              {host.load.map((l) => l.toFixed(2)).join(' · ')} over 1, 5, 15 min · {host.cores} cores
+              {host.iowait_percent == null ? '' : `${host.iowait_percent}% waiting on disks · `}
+              load {host.load.map((l) => l.toFixed(2)).join(' · ')} over 1, 5, 15 min · {host.cores} cores
             </span>
           </div>
           <div>

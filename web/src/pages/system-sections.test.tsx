@@ -71,3 +71,30 @@ describe('ResourcesCard', () => {
     expect(names()).toHaveLength(8);
   });
 });
+
+describe('CPU use', () => {
+  it('shows how busy the CPUs are, not the load average, and the time spent waiting on disks', async () => {
+    stubApi({
+      '/apps': [],
+      '/resources': {
+        containers: [],
+        error: '',
+        // A load of 9 on 4 cores, while the CPUs are 3% busy and 81% waiting on a slow disk.
+        host: {
+          cores: 4,
+          cpu_percent: 3,
+          iowait_percent: 81,
+          load: [9, 8, 7],
+          load_percent: 100,
+          memory_percent: 40,
+          memory_total: 16e9,
+          memory_used: 6e9,
+        },
+      },
+    });
+    renderAt(<ResourcesCard />);
+    expect(await screen.findByRole('meter', { name: 'CPU 3% busy' })).toHaveAttribute('aria-valuenow', '3');
+    expect(screen.getByText(/81% waiting on disks · load 9\.00 · 8\.00 · 7\.00/)).toBeInTheDocument();
+    expect(screen.queryByText('100%')).toBeNull();
+  });
+});

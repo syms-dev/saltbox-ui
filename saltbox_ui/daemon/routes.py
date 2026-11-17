@@ -56,6 +56,7 @@ from ..state.system import (
     tailscale_serve,
     tailscale_serve_status,
     tailscale_status,
+    uptime_seconds,
 )
 from ..yamlio import (
     coerce_scalar,
@@ -141,7 +142,7 @@ def overview(request: Request) -> dict[str, Any]:
             "reboot_required": reboot_required(svc.reboot_flag),
             "reboot_packages": reboot_packages(svc.reboot_flag),
             # How long ago the server started: the web app watches the apps come back after it.
-            "uptime": (svc.uptime or (lambda: host_stats().get("uptime")))(),
+            "uptime": (svc.uptime or uptime_seconds)(),
             "mounts": mounts(),
             "units": systemd_units(),
         },

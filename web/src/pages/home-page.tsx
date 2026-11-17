@@ -314,6 +314,9 @@ function UpdatesCard({ apps }: { apps: App[] }): React.ReactNode {
   );
 }
 
+/** Time spent waiting on disks worth mentioning beside the CPU figure. */
+const IOWAIT_NOTE = 10;
+
 type FigureProps = { children?: React.ReactNode; label: string; to: string; value: React.ReactNode };
 
 /** One figure in the strip at the top of Home; each leads to the page with the detail. */
@@ -335,7 +338,10 @@ function ServerStrip(): React.ReactNode {
   const data = overview.data;
   // The pool the media lives on is the biggest disk; that is the one that fills up.
   const disk = [...(data?.host.disks ?? [])].sort((a, b) => b.total - a.total)[0];
-  const cpu = host?.load_percent ?? null;
+  // How busy the CPUs are. The load average is not it: processes waiting on a slow disk or an
+  // rclone mount raise the load while the CPUs sit idle.
+  const cpu = host?.cpu_percent ?? null;
+  const iowait = host?.iowait_percent ?? null;
   const memory = host?.memory_percent ?? null;
   return (
     <section aria-label="Server at a glance" className={styles['strip']}>
@@ -352,6 +358,9 @@ function ServerStrip(): React.ReactNode {
       </Figure>
       <Figure label="CPU" to="/health" value={cpu === null ? '…' : `${Math.round(cpu)}%`}>
         {cpu === null ? null : <Meter label={`CPU ${Math.round(cpu)}% busy`} percent={Math.round(cpu)} />}
+        {iowait !== null && iowait >= IOWAIT_NOTE ? (
+          <span className={styles['figureSub']}>{Math.round(iowait)}% waiting on disks</span>
+        ) : null}
       </Figure>
       <Figure
         label="Memory"

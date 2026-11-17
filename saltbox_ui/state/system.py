@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -89,13 +90,72 @@ def container_stats(runner: Runner | None = None) -> list[dict[str, Any]]:
     return sorted(stats, key=lambda s: (-s["cpu_percent"], -s["memory"]))
 
 
-def host_stats(proc: Path = Path("/proc")) -> dict[str, Any]:
-    """Load, memory and uptime from /proc."""
+# -- CPU -----------------------------------------------------------------------------------
+# How busy the processors are comes from /proc/stat, as the share of time between two readings
+# spent on work. The load average is something else: it also counts processes waiting on disks
+# and network mounts, so a server with a slow drive or a busy rclone mount shows a load far
+# above its core count while its CPUs sit idle. Time spent waiting on disks (iowait) is given
+# on its own, because that is what such a load is made of.
+CPU_SAMPLE_SECONDS = 0.25
+CPU_SAMPLE_MAX_AGE = 60.0  # an older reading is too stale to measure from; take two fresh ones
+_cpu_lock = threading.Lock()
+_cpu_last: dict[Path, tuple[float, list[int]]] = {}
+
+
+def cpu_times(proc: Path = Path("/proc")) -> list[int]:
+    """user, nice, system, idle, iowait, irq, softirq, steal (in clock ticks, since boot)."""
+    for line in (proc / "stat").read_text().splitlines():
+        fields = line.split()
+        if fields and fields[0] == "cpu":
+            ticks = [int(x) for x in fields[1:9]]
+            return ticks + [0] * (8 - len(ticks))
+    raise ValueError("no cpu line in /proc/stat")
+
+
+def cpu_use(before: list[int], after: list[int]) -> tuple[float, float] | None:
+    """Percent of the time between two readings spent working, and spent waiting on disks."""
+    delta = [max(0, a - b) for a, b in zip(after, before, strict=True)]
+    total = sum(delta)
+    if total == 0:
+        return None
+    idle, iowait = delta[3], delta[4]
+    busy = total - idle - iowait
+    return round(busy / total * 100, 1), round(iowait / total * 100, 1)
+
+
+def cpu_percent(
+    proc: Path = Path("/proc"),
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> tuple[float, float] | None:
+    """CPU use since the last time this was asked (or over a quarter second, the first time)."""
+    with _cpu_lock:
+        now = cpu_times(proc)
+        last = _cpu_last.get(proc)
+        if last is None or clock() - last[0] > CPU_SAMPLE_MAX_AGE:
+            sleep(CPU_SAMPLE_SECONDS)
+            before, now = now, cpu_times(proc)
+        else:
+            before = last[1]
+        _cpu_last[proc] = (clock(), now)
+        return cpu_use(before, now)
+
+
+def host_stats(
+    proc: Path = Path("/proc"), sleep: Callable[[float], None] = time.sleep
+) -> dict[str, Any]:
+    """CPU use, load, memory and uptime from /proc."""
     cores = os.cpu_count() or 1
     result: dict[str, Any] = {"cores": cores}
     try:
+        use = cpu_percent(proc, sleep)
+    except (OSError, ValueError):
+        use = None
+    result["cpu_percent"], result["iowait_percent"] = use if use is not None else (None, None)
+    try:
         load = [float(x) for x in (proc / "loadavg").read_text().split()[:3]]
         result["load"] = load
+        # Load per core, for reference; it is not how busy the CPUs are (see above).
         result["load_percent"] = round(min(100.0, load[0] / cores * 100), 1)
     except (OSError, ValueError, IndexError):
         result["load"], result["load_percent"] = [], None
@@ -115,11 +175,16 @@ def host_stats(proc: Path = Path("/proc")) -> dict[str, Any]:
     except (OSError, ValueError):
         result["memory_total"] = result["memory_used"] = 0
         result["memory_percent"] = None
-    try:
-        result["uptime"] = int(float((proc / "uptime").read_text().split()[0]))
-    except (OSError, ValueError, IndexError):
-        result["uptime"] = None
+    result["uptime"] = uptime_seconds(proc)
     return result
+
+
+def uptime_seconds(proc: Path = Path("/proc")) -> int | None:
+    """Seconds since the server booted."""
+    try:
+        return int(float((proc / "uptime").read_text().split()[0]))
+    except (OSError, ValueError, IndexError):
+        return None
 
 
 # -- tailscale ---------------------------------------------------------------------------------

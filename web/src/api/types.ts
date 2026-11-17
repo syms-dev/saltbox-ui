@@ -429,6 +429,10 @@ export type AppLink = { name: string; purpose: string; url: string };
 
 export type HostStats = {
   cores: number;
+  /** How busy the CPUs were since the last reading (from /proc/stat), not the load average. */
+  cpu_percent?: number | null;
+  /** Of that time, the share spent waiting on disks and network mounts. */
+  iowait_percent?: number | null;
   load: number[];
   load_percent: number | null;
   memory_percent: number | null;
