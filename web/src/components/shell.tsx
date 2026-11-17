@@ -169,7 +169,7 @@ export function Shell(): React.ReactNode {
 
   return (
     <div className={styles['shell']}>
-      <aside className={styles['sidebar']}>
+      <aside aria-label="Sidebar" className={styles['sidebar']}>
         <Link className={styles['brand']} to="/">
           <span aria-hidden="true" className={styles['mark']} />
           <span className={styles['brandText']}>

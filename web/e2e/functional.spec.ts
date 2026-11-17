@@ -46,9 +46,11 @@ test.describe('home', () => {
   test('says which updates want a reboot and restarts the server on request', async ({ page }) => {
     await page.goto('/');
     // The foot of the sidebar names this app and its version, and nothing else.
-    await expect(page.locator('aside')).toContainText('Saltbox UI');
-    await expect(page.locator('aside')).toContainText(/Saltbox UI\s*\d+\.\d+\.\d+/);
-    await expect(page.locator('aside')).not.toContainText('master');
+    // Home has a second aside (its side rail), so the sidebar is found by its name.
+    const sidebar = page.getByRole('complementary', { name: 'Sidebar' });
+    await expect(sidebar).toContainText('Saltbox UI');
+    await expect(sidebar).toContainText(/Saltbox UI\s*\d+\.\d+\.\d+/);
+    await expect(sidebar).not.toContainText('master');
     const reboot = page
       .getByRole('region', { name: 'Needs attention' })
       .getByRole('listitem')
