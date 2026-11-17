@@ -699,6 +699,9 @@ def _container_view(container: dict[str, Any], update: dict[str, Any] | None) ->
         "image": container.get("image_ref") or container.get("image", ""),
         "update": (update or {}).get("status", "unknown"),
         "update_detail": (update or {}).get("detail", ""),
+        # What the update brings: the running image's version and the published one's.
+        "version": (update or {}).get("local_version", ""),
+        "update_version": (update or {}).get("remote_version", ""),
     }
 
 

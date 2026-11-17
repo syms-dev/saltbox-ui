@@ -14,7 +14,9 @@ recreates the container; the daemon offers that as a job.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import platform
 import re
 import shutil
 import subprocess
@@ -37,6 +39,25 @@ MANIFEST_TYPES = ", ".join(
 CHALLENGE_RE = re.compile(r'(\w+)="([^"]*)"')
 
 Runner = Callable[[list[str]], tuple[int, str]]
+DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+_~-]{0,63}")
+BUILD_VERSION = re.compile(r"version:-\s*(\S+)")
+
+
+def host_arch() -> str:
+    """This server's architecture as image indexes name it (amd64, arm64)."""
+    machine = platform.machine().lower()
+    return {"x86_64": "amd64", "aarch64": "arm64", "armv7l": "arm"}.get(machine, machine)
+
+
+def version_of(labels: dict[str, Any]) -> str:
+    """The version an image says it is: the OCI label, else linuxserver's build_version."""
+    found = str(labels.get("org.opencontainers.image.version") or "").strip()
+    if not found:
+        match = BUILD_VERSION.search(str(labels.get("build_version") or ""))
+        found = match.group(1) if match else ""
+    # The text comes from an image's publisher: only a plain version string is kept.
+    return found if VERSION.fullmatch(found) else ""
 
 
 @dataclass
@@ -110,6 +131,53 @@ class Registry:
             self._tokens[key] = str(token)
         return self._tokens[key]
 
+    def _get(self, ref: ImageRef, url: str, accept: str) -> Response:
+        """A GET with the same anonymous token as the HEAD, asked for if the registry wants it."""
+        response = self.transport("GET", url, {"Accept": accept}, None)
+        if response.status == 401:
+            token = self._token(response.headers.get("www-authenticate", ""), ref)
+            headers = {"Accept": accept, "Authorization": f"Bearer {token}"}
+            response = self.transport("GET", url, headers, None)
+        if response.status != 200:
+            raise SetupError(f"{ref.registry}/{ref.repository}: HTTP {response.status}")
+        return response
+
+    def published_version(self, ref: ImageRef, arch: str | None = None) -> str:
+        """The version the tag now points at, from the published image's labels.
+
+        The manifest names the image's config, whose labels carry the version
+        (``org.opencontainers.image.version``). A tag for several platforms is an index:
+        the entry for this server's architecture is read. Only asked for images that have
+        an update, to show what it brings; "" when the image does not say.
+        """
+        arch = arch or host_arch()
+        base = f"https://{ref.registry}/v2/{ref.repository}"
+        manifest = self._get(ref, ref.manifest_url, MANIFEST_TYPES).json()
+        if isinstance(manifest, dict) and isinstance(manifest.get("manifests"), list):
+            entry = next(
+                (
+                    m
+                    for m in manifest["manifests"]
+                    if isinstance(m, dict)
+                    and isinstance(m.get("platform"), dict)
+                    and m["platform"].get("os") == "linux"
+                    and m["platform"].get("architecture") == arch
+                ),
+                None,
+            )
+            digest = str((entry or {}).get("digest", ""))
+            if not DIGEST.fullmatch(digest):
+                return ""
+            manifest = self._get(ref, f"{base}/manifests/{digest}", MANIFEST_TYPES).json()
+        config = manifest.get("config") if isinstance(manifest, dict) else None
+        digest = str(config.get("digest", "")) if isinstance(config, dict) else ""
+        if not DIGEST.fullmatch(digest):
+            return ""
+        blob = self._get(ref, f"{base}/blobs/{digest}", "application/json").json()
+        settings = blob.get("config") if isinstance(blob, dict) else None
+        labels = settings.get("Labels") if isinstance(settings, dict) else None
+        return version_of(labels if isinstance(labels, dict) else {})
+
     def digest(self, ref: ImageRef) -> str:
         response = self._head(ref)
         if response.status == 401:
@@ -155,6 +223,9 @@ class ImageStatus:
     detail: str = ""
     remote_digest: str = ""
     containers: list[str] = field(default_factory=list)
+    # What the running image says it is, and what the published one says (updates only).
+    local_version: str = ""
+    remote_version: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -176,6 +247,9 @@ def check_updates(
             continue
         status = by_image.setdefault(ref, ImageStatus(ref, "unknown"))
         status.containers.append(container["name"])
+        if not status.local_version:
+            labels = container.get("labels")
+            status.local_version = version_of(labels if isinstance(labels, dict) else {})
         image_ids.setdefault(ref, str(container.get("image_id", "")))
     try:
         local = local_digests(image_ids.values(), runner)
@@ -202,6 +276,9 @@ def check_updates(
         else:
             status.status = "update"
             status.detail = "a newer image is published"
+            # The update stands either way; a registry that will not say only hides the version.
+            with contextlib.suppress(SetupError, ValueError):
+                status.remote_version = registry.published_version(parsed)
     return by_image
 
 

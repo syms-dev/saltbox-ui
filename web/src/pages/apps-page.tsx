@@ -14,6 +14,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useApps, useCheckUpdates, useJobs, useUpdates } from '../api/queries';
 import type { App } from '../api/types';
 import { AppAvatar } from '../components/app-avatar';
+import { UpdateVersions } from '../components/app-links';
 import { ErrorMessage, Loading } from '../components/query-state';
 import { StatusDot } from '../components/status-dot';
 import { formatRelative } from '../format';
@@ -106,9 +107,12 @@ function InstalledRow({ app }: { app: App }): React.ReactNode {
       </span>
       <span className={styles['rowUpdate']}>
         {app.update_available ? (
-          <button className="small primary" disabled={busy} onClick={() => void jobs.updateApp(app)} type="button">
-            <ArrowUpCircle aria-hidden="true" size={15} /> Update
-          </button>
+          <>
+            <button className="small primary" disabled={busy} onClick={() => void jobs.updateApp(app)} type="button">
+              <ArrowUpCircle aria-hidden="true" size={15} /> Update
+            </button>
+            <UpdateVersions app={app} compact />
+          </>
         ) : (
           <span className="muted small">{app.containers.some((c) => c.update === 'current') ? 'Up to date' : ''}</span>
         )}

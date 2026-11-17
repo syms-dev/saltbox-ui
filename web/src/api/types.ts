@@ -106,6 +106,9 @@ export type ContainerState = {
   status: string;
   update: UpdateState;
   update_detail: string;
+  /** The running image's version and, when an update is published, the new one's ('' if unknown). */
+  version?: string;
+  update_version?: string;
   urls: string[];
 };
 

@@ -63,6 +63,8 @@ def _container(
     depends_on: str = "",
 ) -> dict[str, Any]:
     labels = {"com.github.saltbox.saltbox_managed": "true"}
+    if name == "sonarr":  # the running version, to show what its pending update brings
+        labels["org.opencontainers.image.version"] = "4.0.10.2544"
     if depends_on:
         labels["com.github.saltbox.depends_on"] = depends_on
     if web:
@@ -244,6 +246,12 @@ echo "localhost : ok=12 changed=1 unreachable=0 failed=0"
 def registry_transport(method: str, url: str, headers: dict[str, str], body: Any) -> Response:
     """A registry with no auth: every image is current except UPDATED_IMAGES."""
     path = url.split("/v2/", 1)[1]
+    config = "sha256:" + "c" * 64
+    if path.endswith(f"/blobs/{config}"):  # the published image's labels: its version
+        labels = {"org.opencontainers.image.version": "4.0.11.2680"}
+        return Response(200, json.dumps({"config": {"Labels": labels}}).encode())
+    if method == "GET" and path.split("/manifests/", 1)[0] in UPDATED_IMAGES:
+        return Response(200, json.dumps({"config": {"digest": config}}).encode())
     repository = path.split("/manifests/", 1)[0]
     name = repository.rsplit("/", 1)[-1]
     digest = "sha256:newer" if repository in UPDATED_IMAGES else f"sha256:{name}"

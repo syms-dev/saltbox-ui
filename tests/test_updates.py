@@ -597,3 +597,70 @@ def test_a_check_asked_for_during_a_check_runs_after_it(scratch_layout: Layout) 
     release.set()
     service.wait(5)
     assert len(calls) == 2
+
+
+def test_an_update_says_what_version_it_brings() -> None:
+    """The published image's labels name its version: the tag's index is read for this
+    server's architecture, then that manifest's config blob, then its labels."""
+    from saltbox_ui.state.updates import Registry, parse_ref, version_of
+
+    amd, arm, config = ("sha256:" + c * 64 for c in "abc")
+    index = {
+        "manifests": [
+            {"digest": arm, "platform": {"architecture": "arm64", "os": "linux"}},
+            {"digest": amd, "platform": {"architecture": "amd64", "os": "linux"}},
+        ]
+    }
+    answers = {
+        "/manifests/release": index,
+        f"/manifests/{amd}": {"config": {"digest": config}},
+        f"/blobs/{config}": {
+            "config": {"Labels": {"org.opencontainers.image.version": "4.0.11.2680"}}
+        },
+    }
+
+    def transport(method, url, headers, body):
+        for suffix, data in answers.items():
+            if url.endswith(suffix):
+                return Response(200, json.dumps(data).encode(), {})
+        return Response(404, b"", {})
+
+    ref = parse_ref("ghcr.io/hotio/sonarr:release")
+    assert Registry(transport).published_version(ref, "amd64") == "4.0.11.2680"
+    assert Registry(transport).published_version(ref, "riscv64") == ""  # no image for it
+    lsio = "Linuxserver.io version:- 3.0.2.5780-ls169 Build-date:- 2026-11-16"
+    assert version_of({"build_version": lsio}) == "3.0.2.5780-ls169"
+    assert version_of({"org.opencontainers.image.version": "<b>x</b>"}) == ""  # only a version
+
+
+def test_check_updates_records_the_running_and_the_published_version() -> None:
+    from saltbox_ui.state.updates import check_updates
+
+    class Registry:
+        def digest(self, ref):
+            return "sha256:pub"
+
+        def published_version(self, ref):
+            return "4.0.11"
+
+    containers = [
+        {
+            "name": "sonarr",
+            "image_ref": "hotio/sonarr:release",
+            "image_id": "sha256:old",
+            "labels": {"org.opencontainers.image.version": "4.0.10"},
+        }
+    ]
+    found = check_updates(
+        containers,
+        registry=Registry(),  # type: ignore[arg-type]
+        runner=lambda args: (
+            0,
+            json.dumps([{"Id": "sha256:old", "RepoDigests": ["x@sha256:was"]}]),
+        ),
+    )["hotio/sonarr:release"]
+    assert (found.status, found.local_version, found.remote_version) == (
+        "update",
+        "4.0.10",
+        "4.0.11",
+    )

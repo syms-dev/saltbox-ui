@@ -17,7 +17,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useAppDetail, useContainerLogs, useJobs, useResources, useUpdateOverrides } from '../api/queries';
 import type { App, AppDetail, ContainerState, Field } from '../api/types';
 import { AppAvatar } from '../components/app-avatar';
-import { UpdateBadge } from '../components/app-links';
+import { UpdateBadge, UpdateVersions } from '../components/app-links';
 import { useToast } from '../components/feedback';
 import { LogView } from '../components/log-view';
 import { ErrorMessage, Loading } from '../components/query-state';
@@ -592,9 +592,12 @@ export function AppPage(): React.ReactNode {
             </a>
           )}
           {data.update_available ? (
-            <button className="primary" disabled={busy} onClick={() => void jobActions.updateApp(app)} type="button">
-              <ArrowUpCircle aria-hidden="true" size={16} /> Update
-            </button>
+            <>
+              <button className="primary" disabled={busy} onClick={() => void jobActions.updateApp(app)} type="button">
+                <ArrowUpCircle aria-hidden="true" size={16} /> Update
+              </button>
+              <UpdateVersions app={app} />
+            </>
           ) : null}
           {main === undefined ? null : main.status === 'running' ? (
             <button

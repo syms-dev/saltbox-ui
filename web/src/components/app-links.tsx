@@ -1,4 +1,4 @@
-import type { UpdateState } from '../api/types';
+import type { App, UpdateState } from '../api/types';
 import { hostOf } from '../lib/status';
 import { StatusBadge } from './status-badge';
 
@@ -45,4 +45,47 @@ export function overallUpdate(states: UpdateState[]): UpdateState {
   if (states.includes('update')) return 'update';
   if (states.length > 0 && states.every((state) => state === 'current')) return 'current';
   return 'unknown';
+}
+
+/** The version an update moves an app from and to, when its images say; null when not known. */
+export function updateVersions(app: Pick<App, 'containers'>): { from: string; to: string } | null {
+  const container = app.containers.find((c) => c.update === 'update' && (c.update_version ?? '') !== '');
+  if (container === undefined) return null;
+  return { from: container.version ?? '', to: container.update_version ?? '' };
+}
+
+/** "4.0.10 → 4.0.11 · Releases": what an update brings, and where its release page is. */
+export function UpdateVersions({
+  app,
+  compact = false,
+}: {
+  app: Pick<App, 'app_links' | 'containers'>;
+  compact?: boolean;
+}): React.ReactNode {
+  const versions = updateVersions(app);
+  if (compact) {
+    // In a narrow list row: the new version only, the whole change on hover.
+    return versions === null ? null : (
+      <span className="muted small" title={`${versions.from || 'now'} → ${versions.to}`}>
+        <code>{versions.to}</code>
+      </span>
+    );
+  }
+  const releases = app.app_links.find((link) => link.purpose === 'release' && link.url.startsWith('https://'));
+  if (versions === null && releases === undefined) return null;
+  return (
+    <span className="muted small">
+      {versions === null ? null : (
+        <>
+          {versions.from === '' ? 'to' : <code>{versions.from}</code>} → <code>{versions.to}</code>
+        </>
+      )}
+      {versions !== null && releases !== undefined ? ' · ' : null}
+      {releases === undefined ? null : (
+        <a href={releases.url} rel="noreferrer" target="_blank">
+          Releases
+        </a>
+      )}
+    </span>
+  );
 }

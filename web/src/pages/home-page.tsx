@@ -24,6 +24,7 @@ import {
 } from '../api/queries';
 import type { App, Job } from '../api/types';
 import { AppAvatar } from '../components/app-avatar';
+import { updateVersions } from '../components/app-links';
 import { useToast } from '../components/feedback';
 import { Meter } from '../components/meter';
 import { ErrorMessage, Loading } from '../components/query-state';
@@ -264,7 +265,12 @@ function UpdatesCard({ apps }: { apps: App[] }): React.ReactNode {
           ) : (
             <span className={styles['due']}>
               <ArrowUpCircle aria-hidden="true" size={16} /> {pending.length} app{pending.length === 1 ? '' : 's'}:{' '}
-              {pending.map((a) => a.title).join(', ')}
+              {pending
+                .map((a) => {
+                  const versions = updateVersions(a);
+                  return versions === null ? a.title : `${a.title} ${versions.to}`;
+                })
+                .join(', ')}
             </span>
           )}
         </li>
