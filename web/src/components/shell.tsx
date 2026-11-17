@@ -1,5 +1,6 @@
 import {
   Activity,
+  ArrowUpCircle,
   BellRing,
   Cable,
   FileCog,
@@ -16,12 +17,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
 
 import { ApiError, apiFetch, API_ROUTES } from '../api/client';
-import { QUERY_KEYS, useJobs, useMeta, useOverview } from '../api/queries';
+import { QUERY_KEYS, useJobs, useMeta, useOverview, useSelf } from '../api/queries';
 import type { Job, Meta } from '../api/types';
 import { formatDuration } from '../format';
 import { CommandPalette } from './command-palette';
 import { ConnectionBanner, StartupBanner, useConnection } from './connection';
 import { useToast } from './feedback';
+import { newerLine } from './self-update';
 import styles from './shell.module.css';
 
 const ICON = 18;
@@ -53,10 +55,23 @@ function tabClass({ isActive }: { isActive: boolean }): string {
  * branch Saltbox is on belongs with `sb update` on the System page, where it is shown.
  */
 function Version({ meta }: { meta: Meta }): React.ReactNode {
+  const self = useSelf();
+  const status = self.data;
   return (
     <span className={styles['version']}>
       <span>Saltbox UI</span>
       <span className={styles['versionNumber']}>{meta.version}</span>
+      {/* A newer version: a small mark that leads to the update on the System page. */}
+      {status?.update_available === true ? (
+        <Link
+          aria-label={`Update available. ${newerLine(status)}`}
+          className={styles['versionUpdate']}
+          title={newerLine(status)}
+          to="/system#saltbox-ui"
+        >
+          <ArrowUpCircle aria-hidden="true" size={16} />
+        </Link>
+      ) : null}
     </span>
   );
 }

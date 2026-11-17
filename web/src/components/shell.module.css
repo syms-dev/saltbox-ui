@@ -287,6 +287,17 @@
   gap: var(--space-2);
 }
 
+.versionUpdate {
+  align-items: center;
+  border-radius: var(--radius-full);
+  color: var(--color-accent);
+  display: inline-flex;
+}
+
+.versionUpdate:hover {
+  color: var(--color-accent-hover);
+}
+
 .versionNumber {
   background: var(--color-surface-2);
   border-radius: var(--radius-full);

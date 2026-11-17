@@ -769,8 +769,12 @@ test.describe('updating Saltbox UI itself', () => {
       .filter({ hasText: 'Saltbox UI update available' });
     await expect(offer).toContainText('New commits are available (2222222).');
 
-    await page.goto('/system');
+    // A mark beside the version in the sidebar says so on every page, and leads to the update.
+    const sidebar = page.getByRole('complementary', { name: 'Sidebar' });
+    await sidebar.getByRole('link', { name: 'Update available. New commits are available (2222222).' }).click();
+    await expect(page).toHaveURL(/\/system#saltbox-ui$/);
     const card = page.getByRole('region', { name: 'Saltbox UI version' });
+    await expect(card).toBeInViewport();
     await expect(card).toContainText(/\d+\.\d+\.\d+, running from a source checkout at 1111111/);
     await card.getByRole('button', { name: 'Update Saltbox UI' }).click();
     expect(await confirm(page, 'Update Saltbox UI?', 'Update Saltbox UI')).toContain('reloads by itself');
@@ -787,5 +791,8 @@ test.describe('updating Saltbox UI itself', () => {
     await page.goto('/');
     await expect(page.getByRole('region', { name: 'Needs attention' })).toBeVisible();
     await expect(page.getByText('Saltbox UI update available')).toHaveCount(0);
+    await expect(
+      page.getByRole('complementary', { name: 'Sidebar' }).getByRole('link', { name: /Update available/ }),
+    ).toHaveCount(0);
   });
 });

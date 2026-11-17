@@ -1,3 +1,6 @@
+import { useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
+
 import { useCheckSelf, useJobs, useSelf } from '../api/queries';
 import type { SelfStatus } from '../api/types';
 import { useJobActions } from '../lib/actions';
@@ -41,8 +44,15 @@ export function SelfUpdateCard(): React.ReactNode {
   const actions = useJobActions();
   const status = self.data;
   const busy = jobs.data?.busy ?? false;
+  const location = useLocation();
+  const section = useRef<HTMLElement>(null);
+  const loaded = status !== undefined;
+  // The update mark beside the version in the sidebar links here.
+  useEffect(() => {
+    if (loaded && location.hash === '#saltbox-ui') section.current?.scrollIntoView({ block: 'start' });
+  }, [loaded, location.hash]);
   return (
-    <section aria-labelledby="self-title" className="card" id="saltbox-ui">
+    <section aria-labelledby="self-title" className="card" id="saltbox-ui" ref={section}>
       <div className="row">
         <h2 className={styles['title']} id="self-title">
           Saltbox UI version
