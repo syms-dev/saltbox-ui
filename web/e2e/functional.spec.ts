@@ -357,6 +357,22 @@ test.describe('apps', () => {
     expect(after).toBe(before);
   });
 
+  test('an app with an update shows what it brings, from its release notes', async ({ page }) => {
+    await page.goto('/apps/saltbox/sonarr');
+    const notes = page.getByRole('region', { name: "What's new" });
+    await expect(notes.getByText('4.0.11.2680', { exact: true })).toBeVisible();
+    await expect(notes).toContainText('- Fixed: Season pack imports\n- New: Faster RSS sync');
+    await expect(notes).not.toContainText('Beta: not part of this update');
+    await expect(notes.getByRole('link', { name: '4.0.11.2680 on GitHub ↗' })).toHaveAttribute(
+      'href',
+      'https://github.com/Sonarr/Sonarr/releases/tag/v4.0.11.2680',
+    );
+    // No update waiting, no notes asked for.
+    await page.goto('/apps/saltbox/radarr');
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Radarr');
+    await expect(page.getByRole('region', { name: "What's new" })).toHaveCount(0);
+  });
+
   test('updating one app runs its tag and shows the outcome', async ({ page }) => {
     await page.goto('/apps');
     const sonarr = page

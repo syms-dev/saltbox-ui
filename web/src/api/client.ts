@@ -54,6 +54,7 @@ export const API_ROUTES = {
   appUpdate: (repo: string, role: string) => `/apps/${seg(repo)}/${seg(role)}/update` as const,
   appDetail: (repo: string, role: string) => `/apps/${seg(repo)}/${seg(role)}` as const,
   appOverrides: (repo: string, role: string) => `/apps/${seg(repo)}/${seg(role)}/overrides` as const,
+  appReleaseNotes: (repo: string, role: string) => `/apps/${seg(repo)}/${seg(role)}/release-notes` as const,
   configFile: (name: string) => `/config/${seg(name)}` as const,
   containerAction: (name: string, action: string) => `/containers/${seg(name)}/${seg(action)}` as const,
   containerLogs: (name: string, tail: number) => `/containers/${seg(name)}/logs?tail=${tail}` as const,

@@ -31,6 +31,7 @@ import type {
   Overview,
   RecyclarrStatus,
   RecyclarrUsage,
+  ReleaseNotes,
   SeedingStatus,
   SelfStatus,
   DriveHealth,
@@ -94,6 +95,16 @@ export function useAppDetail(repo: string, role: string, reveal = false): UseQue
       apiFetch<AppDetail>(`${API_ROUTES.appDetail(repo, role)}${reveal ? '?reveal=true' : ''}`, { signal }),
     ...unkept(reveal),
     queryKey: [QUERY_KEYS.APPS, repo, role, reveal],
+  });
+}
+
+/** The release notes for an app's waiting update; only asked for when it has one. */
+export function useReleaseNotes(repo: string, role: string, enabled: boolean): UseQueryResult<ReleaseNotes> {
+  return useQuery({
+    enabled,
+    queryFn: ({ signal }) => apiFetch<ReleaseNotes>(API_ROUTES.appReleaseNotes(repo, role), { signal }),
+    queryKey: [QUERY_KEYS.APPS, repo, role, 'release-notes'],
+    staleTime: 30 * 60_000,
   });
 }
 

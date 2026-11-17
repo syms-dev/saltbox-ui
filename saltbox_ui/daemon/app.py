@@ -27,6 +27,7 @@ from .. import __version__, safefs, selfupdate
 from ..catalog import Catalog
 from ..config import ConfigService, Inventory
 from ..layout import Layout
+from ..releasenotes import ReleaseNotes
 from ..runner import SbRunner
 from ..state.containers import invalidate_containers
 from ..yamlio import DuplicateKeys
@@ -92,6 +93,8 @@ class Services:
     storage_roots: tuple[Path, Path] = (Path("/mnt/unionfs"), Path("/mnt/local"))
     # Runs ``docker logs`` for the problem finder (tests replace it).
     log_runner: Callable[[list[str]], tuple[int, str]] | None = None
+    # The apps' release notes on GitHub, for what an update brings (tests replace it).
+    release_notes: ReleaseNotes | None = None
     updates: UpdateService = field(init=False)
     automation: AutomationService = field(init=False)
     dismissals: Dismissals = field(init=False)
@@ -103,6 +106,8 @@ class Services:
         self.runner = SbRunner(self.layout)
         self.jobs = JobManager(self.runner)
         self.updates = UpdateService(self.layout)
+        if self.release_notes is None:
+            self.release_notes = ReleaseNotes()
         # An install job pulls new images: mark what is now current at once (from Docker),
         # then check the registries again.
         self.jobs.on_finish.append(self._after_install)

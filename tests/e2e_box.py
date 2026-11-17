@@ -42,6 +42,7 @@ from saltbox_ui.appsetup.http import Response
 from saltbox_ui.daemon import Services, create_app
 from saltbox_ui.daemon.updates import UpdateService
 from saltbox_ui.layout import Layout
+from saltbox_ui.releasenotes import ReleaseNotes
 from saltbox_ui.state.updates import Registry, check_updates
 
 from .saltbox_checkout import saltbox_checkout
@@ -426,6 +427,36 @@ def apps_transport(method: str, url: str, headers: dict[str, str], body: Any) ->
     return Response(404, b"not part of the e2e box")
 
 
+# Sonarr's releases on GitHub, as the API lists them: the update the box has waiting
+# (4.0.10.2544 to 4.0.11.2680) brings one release; a beta after it is not part of it.
+SONARR_RELEASES = [
+    {
+        "tag_name": "v4.0.12.2700",
+        "name": "4.0.12.2700",
+        "prerelease": True,
+        "draft": False,
+        "published_at": "2026-11-14T09:00:00Z",
+        "html_url": "https://github.com/Sonarr/Sonarr/releases/tag/v4.0.12.2700",
+        "body": "Beta: not part of this update",
+    },
+    {
+        "tag_name": "v4.0.11.2680",
+        "name": "4.0.11.2680",
+        "prerelease": False,
+        "draft": False,
+        "published_at": "2026-11-10T09:00:00Z",
+        "html_url": "https://github.com/Sonarr/Sonarr/releases/tag/v4.0.11.2680",
+        "body": "Changes:\r\n- Fixed: Season pack imports\r\n- New: Faster RSS sync",
+    },
+]
+
+
+def github_transport(method: str, url: str, headers: dict, body: bytes | None) -> Response:
+    if url == "https://api.github.com/repos/Sonarr/Sonarr/releases?per_page=30":
+        return Response(200, json.dumps(SONARR_RELEASES).encode())
+    return Response(404, b'{"message": "Not Found"}')
+
+
 def e2e_files(container: str, path: str) -> str:
     return {"/tmp/gluetun/ip": "203.0.113.44", "/tmp/gluetun/forwarded_port": "51413"}.get(path, "")
 
@@ -596,6 +627,7 @@ def main(argv: list[str] | None = None) -> int:
         ]
         services.restart = lambda: updated.write_text("yes\n")
         services.claude = ("claude", fake_claude)
+        services.release_notes = ReleaseNotes(transport=github_transport)
         services.app_setup_factory = lambda layout: AppSetup(
             layout,
             transport=apps_transport,

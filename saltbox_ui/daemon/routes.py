@@ -478,6 +478,29 @@ def _public(plan: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in plan.items() if not key.startswith("_")}
 
 
+@router.get("/apps/{repo}/{role}/release-notes")
+def release_notes(request: Request, repo: str, role: str) -> dict[str, Any]:
+    """The upstream release notes for the update the app has waiting, when GitHub has them."""
+    svc = services(request)
+    app = svc.catalog.app(role, repo)
+    if app is None:
+        raise HTTPException(404, f"unknown app {repo}/{role}")
+    instances = svc.inventory.instances(role, app.default_instances or [role])
+    found = _containers_or_none()
+    updates = svc.updates.status_by_container()
+    waiting = [
+        update
+        for name in _containers_of(app, instances, _owners(svc, found))
+        if (update := updates.get(name)) and update.get("status") == "update"
+    ]
+    target = next((u for u in waiting if u.get("remote_version")), None)
+    if target is None:
+        return {"project": "", "releases_url": "", "releases": [], "more": False, "error": ""}
+    return svc.release_notes.for_update(
+        app.role, str(target.get("local_version", "")), str(target["remote_version"])
+    )
+
+
 @router.get("/apps/{repo}/{role}/uninstall")
 def uninstall_preview(request: Request, repo: str, role: str) -> dict[str, Any]:
     svc = services(request)

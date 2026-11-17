@@ -339,6 +339,28 @@ export type Field = {
   value: unknown;
 };
 
+/** One upstream release an update brings, from the app's GitHub releases. Notes are plain text. */
+export type ReleaseNote = {
+  body: string;
+  name: string;
+  prerelease: boolean;
+  published_at: string;
+  /** This release's page on GitHub, or "" when GitHub's answer named some other page. */
+  url: string;
+  version: string;
+};
+
+/** What an app's waiting update brings, as far as its GitHub releases say. */
+export type ReleaseNotes = {
+  error: string;
+  /** More releases lie between the two versions than are listed. */
+  more: boolean;
+  /** The app's GitHub project, or "" when none is known for it. */
+  project: string;
+  releases: ReleaseNote[];
+  releases_url: string;
+};
+
 export type AppDetail = {
   app: Omit<App, 'containers' | 'installed' | 'instances' | 'update_available' | 'urls'>;
   containers: ContainerState[];

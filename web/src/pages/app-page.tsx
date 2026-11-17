@@ -20,6 +20,7 @@ import { AppAvatar } from '../components/app-avatar';
 import { UpdateBadge, UpdateVersions } from '../components/app-links';
 import { useToast } from '../components/feedback';
 import { LogView } from '../components/log-view';
+import { ReleaseNotesCard } from '../components/release-notes';
 import { ErrorMessage, Loading } from '../components/query-state';
 import { StatusDot } from '../components/status-dot';
 import { formatBytes } from '../format';
@@ -137,6 +138,7 @@ function OverviewTab({ detail, installed }: { detail: AppDetail; installed: bool
   const links = app.app_links.filter((link) => link.url !== '');
   return (
     <div className="stack">
+      {detail.update_available ? <ReleaseNotesCard repo={app.repo} role={app.role} /> : null}
       {installed ? (
         <section className="card">
           <h2>Containers</h2>
