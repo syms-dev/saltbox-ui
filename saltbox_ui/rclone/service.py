@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import re
-import shlex
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -113,7 +112,9 @@ class RcloneService:
         except FileNotFoundError as error:
             raise RcloneError(f"rclone not found: {error}") from error
         except subprocess.TimeoutExpired as error:
-            raise RcloneError(f"rclone timed out: {shlex.join(cmd)}") from error
+            # Never put the command in the message: an answer (a password, a token) is passed
+            # as --result and this text is shown on screen and can be logged.
+            raise RcloneError("rclone timed out after 120s") from error
         return result.returncode, result.stdout, result.stderr
 
     def run(self, *args: str) -> str:

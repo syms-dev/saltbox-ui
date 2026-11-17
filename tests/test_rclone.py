@@ -123,3 +123,18 @@ def test_media_layout_and_delete(service: RcloneService) -> None:
     assert service.list_dirs("gd") == ["Media"]
     service.delete_remote("gd")
     assert service.remotes() == []
+
+
+def test_a_timed_out_rclone_does_not_leak_the_answer(monkeypatch) -> None:
+    import subprocess
+
+    from saltbox_ui.rclone import service as rclone_service
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0] if args else "rclone", 120)
+
+    monkeypatch.setattr(rclone_service.subprocess, "run", timeout)
+    svc = rclone_service.RcloneService(binary="/bin/rclone")
+    with pytest.raises(rclone_service.RcloneError) as caught:
+        svc.run("config", "create", "r", "sftp", "--result", "hunter2-secret")
+    assert "hunter2-secret" not in str(caught.value) and "config" not in str(caught.value)

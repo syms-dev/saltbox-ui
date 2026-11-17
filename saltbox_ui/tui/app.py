@@ -131,7 +131,9 @@ def ensure_root(argv: list[str]) -> None:
     command = ["sudo"]
     if keep:
         command.append(f"--preserve-env={keep}")
-    command += [sys.executable, "-m", "saltbox_ui.tui", *argv]
+    # -I: an isolated interpreter, so root does not import code from the current folder
+    # (an app container can write one there), the same as every other root re-exec here.
+    command += [sys.executable, "-I", "-m", "saltbox_ui.tui", *argv]
     os.execvp("sudo", command)
 
 

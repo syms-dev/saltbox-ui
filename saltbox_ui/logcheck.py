@@ -288,7 +288,9 @@ def analyse(
         key = issue_key(container, rule, signed)
         group = groups.setdefault(key, {"count": 0, "rule": rule, "subjects": {}})
         group["count"] += 1
-        group["message"] = message[:MAX_MESSAGE]
+        # Kept whole (within MAX_LINE) so secrets are masked before the message is cut for
+        # display; the caller redacts and then cuts to MAX_MESSAGE.
+        group["message"] = message
         group["full"] = message
         group["last_seen"] = seen
         if rule is not None and rule.subject is not None:

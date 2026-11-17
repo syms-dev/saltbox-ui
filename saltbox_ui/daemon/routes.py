@@ -906,7 +906,9 @@ def _problems_scan(svc) -> dict[str, Any]:
                 "groups": [
                     {
                         **group,
-                        "message": redact(group["message"]),
+                        # Mask, then cut: a secret that straddled the cut would otherwise
+                        # show its head (the redactor matches whole values only).
+                        "message": redact(group["message"])[: logcheck.MAX_MESSAGE],
                         "subjects": [redact(subject) for subject in group["subjects"]],
                     }
                     for group in found[name]

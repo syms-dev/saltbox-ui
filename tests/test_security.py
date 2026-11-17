@@ -1192,3 +1192,32 @@ def test_the_update_refuses_what_it_cannot_check(monkeypatch, capfd, tmp_path: P
         check=False,
     )
     assert done.returncode == 0 and str(tmp_path) not in done.stdout, done.stderr
+
+
+def test_the_installer_reexec_isolates_the_interpreter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The installer re-execs itself through sudo when not root; without -I, root Python
+    would import a module a container planted in the current folder."""
+    import os
+
+    from saltbox_ui.tui import app as tui_app
+
+    recorded: list[list[str]] = []
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(os, "execvp", lambda file, argv: recorded.append(argv))
+    monkeypatch.delenv("SALTBOX_UI_NO_SUDO", raising=False)
+    tui_app.ensure_root(["--setup"])
+    argv = recorded[0]
+    assert "-I" in argv and argv.index("-I") < argv.index("-m")
+
+
+def test_the_installer_strips_terminal_escape_sequences() -> None:
+    """An app's error or rclone's output reaches the installer's widgets and runs as root's
+    terminal; escape sequences (clear screen, set title, write clipboard) are removed."""
+    from saltbox_ui.tui import plain
+
+    hostile = "ok\x1b[2J\x1b]0;title\x07\x9b31mbad\ttab\nline"
+    cleaned = plain.scrub(hostile)
+    assert "\x1b" not in cleaned and "\x9b" not in cleaned
+    assert "\t" in cleaned and "\n" in cleaned and "ok" in cleaned and "bad" in cleaned
+    assert "\x1b" not in plain.literal(hostile).plain
+    assert "\x1b" not in str(plain.Static(hostile).render())

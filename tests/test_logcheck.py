@@ -398,3 +398,22 @@ def test_a_long_log_line_does_not_stall_the_scan() -> None:
     good = T + 'ERR Anchor files unavailable missing_anchors=["mounted.bin"]'
     _, text = logcheck.split_time(good)
     assert logcheck.missing_anchors(logcheck.clean(text)) == ["mounted.bin"]
+
+
+def test_a_secret_near_the_cut_is_masked_before_the_line_is_cut(
+    scratch_layout: Layout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The latest line was cut to its display length before secrets were masked, so a
+    secret that straddled the cut showed its head. It is masked first, then cut."""
+    monkeypatch.setattr(daemon_routes, "_containers_or_none", lambda: [container("sonarr")])
+    secret = "Zqx7Z9Km2Vb4Rn8"  # shares no prefix with the words around it in the line
+    scratch_layout.config_file("accounts").write_text(
+        f"---\nuser:\n  name: seed\n  pass: {secret}\n"
+    )
+    body = "ERROR failed to connect to the database " + "x" * 352 + " token=" + secret + " end"
+    services = Services(scratch_layout, log_runner=lambda args: (0, "\n".join([T + body] * 3)))
+    client = TestClient(create_app(services=services))
+    message = client.get("/api/problems").json()["containers"][0]["groups"][0]["message"]
+    assert secret not in message
+    for cut in range(4, len(secret)):
+        assert secret[:cut] not in message, f"leaked a {cut}-char prefix of the secret"
