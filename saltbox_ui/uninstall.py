@@ -14,7 +14,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .state.containers import Runner, _run_long
+from .state.containers import Runner, _run_long, invalidate_containers
 
 DEPENDS_ON_LABEL = "com.github.saltbox.depends_on"
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -56,7 +56,10 @@ def data_folder(appdata: Path, name: str) -> Path | None:
 
 
 def remove_container(name: str, runner: Runner | None = None) -> None:
-    code, output = (runner or _run_long)(["docker", "rm", "--force", "--", name])
+    try:
+        code, output = (runner or _run_long)(["docker", "rm", "--force", "--", name])
+    finally:
+        invalidate_containers()  # the next listing must not still show it
     if code != 0:
         raise UninstallError(output.strip() or f"docker rm {name} failed")
 

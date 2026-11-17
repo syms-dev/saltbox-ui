@@ -39,7 +39,7 @@ test.describe('home', () => {
     await expect(sonarr).toHaveAttribute('href', 'https://sonarr.e2e.example');
     await expect(sonarr).toHaveAttribute('target', '_blank');
     await expect(page.getByRole('region', { name: 'Updates' })).toContainText(
-      '4 apps: Authelia, Gluetun, Sonarr, Traefik Proxy',
+      '4 apps: Authelia, Gluetun, Sonarr 4.0.11.2680, Traefik Proxy',
     );
   });
 

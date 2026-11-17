@@ -36,7 +36,6 @@ from ..secrets import (
 from ..state import (
     cached_tags,
     disk_usage,
-    invalidate_containers,
     list_containers,
     mounts,
     read_all_facts,
@@ -1531,8 +1530,6 @@ def container_act(request: Request, name: str, action: str) -> dict[str, Any]:
         container_action(name, action)
     except RuntimeError as error:
         raise HTTPException(502, str(error)) from error
-    finally:
-        invalidate_containers()  # the next listing shows the new state, not a cached one
     update = svc.updates.status_by_container().get(name)
     return _container_view(_managed_container(name), update)
 

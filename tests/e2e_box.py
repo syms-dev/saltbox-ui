@@ -250,7 +250,7 @@ def registry_transport(method: str, url: str, headers: dict[str, str], body: Any
     if path.endswith(f"/blobs/{config}"):  # the published image's labels: its version
         labels = {"org.opencontainers.image.version": "4.0.11.2680"}
         return Response(200, json.dumps({"config": {"Labels": labels}}).encode())
-    if method == "GET" and path.split("/manifests/", 1)[0] in UPDATED_IMAGES:
+    if method == "GET" and path.split("/manifests/", 1)[0] == "hotio/sonarr":  # it says its version
         return Response(200, json.dumps({"config": {"digest": config}}).encode())
     repository = path.split("/manifests/", 1)[0]
     name = repository.rsplit("/", 1)[-1]

@@ -179,7 +179,10 @@ def container_action(name: str, action: str, runner: Runner | None = None) -> No
     """Start, stop or restart a container through the docker CLI."""
     if action not in CONTAINER_ACTIONS:
         raise ValueError(f"unknown action {action!r}")
-    code, output = (runner or _run_long)(["docker", action, "--", name])
+    try:
+        code, output = (runner or _run_long)(["docker", action, "--", name])
+    finally:
+        invalidate_containers()  # the next listing shows its new state, not a cached one
     if code != 0:
         raise RuntimeError(output.strip() or f"docker {action} {name} failed")
 
